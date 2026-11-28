@@ -1,0 +1,105 @@
+"""Observe two FILE_RENAME_INFO forms on new, empty task-owned directories."""
+import sys
+sys.dont_write_bytecode = True
+import contextlib
+import ctypes as C
+import hashlib
+import json
+import os
+from pathlib import Path
+import types
+
+TASK = Path(r"<TASK>")
+INPUTS = TASK / "closed-v9-retirement-inputs-v2"
+OUTPUT = TASK / "rename-qualification-20261126-v1.json"
+FIXTURE = TASK / "trash" / "rename-api-20261126-v1"
+
+
+def pinned_module(path, expected, name):
+    raw = path.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != expected:
+        raise RuntimeError("input digest differs: " + str(path))
+    module = types.ModuleType(name)
+    module.__file__ = str(path)
+    exec(compile(raw, str(path), "exec"), module.__dict__)
+    return module
+
+
+def rename_absolute(scope, handle, destination):
+    class RenameInfo(C.Structure):
+        _fields_ = [("flags", C.c_uint32), ("root", C.c_void_p),
+                    ("length", C.c_uint32), ("name", C.c_uint16 * 1)]
+    if C.sizeof(C.c_void_p) != 8 or RenameInfo.name.offset != 20:
+        raise RuntimeError("unexpected FILE_RENAME_INFO layout")
+    encoded = str(destination).encode("utf-16-le")
+    raw = C.create_string_buffer(max(C.sizeof(RenameInfo), RenameInfo.name.offset + len(encoded) + 2))
+    value = RenameInfo.from_buffer(raw)
+    value.root, value.length = None, len(encoded)
+    C.memmove(C.addressof(raw) + RenameInfo.name.offset, encoded, len(encoded))
+    function = scope.bind(scope.K, "SetFileInformationByHandle", C.c_int,
+                          [C.c_void_p, C.c_int, C.c_void_p, C.c_uint32])
+    scope.require(function(handle, 3, raw, len(raw)), "absolute original-directory rename")
+
+
+def main():
+    if os.name != "nt" or not sys.flags.isolated or not sys.flags.no_site or not sys.flags.dont_write_bytecode or sys.argv[1:] or Path.cwd() != TASK:
+        raise RuntimeError("native isolated task-bound invocation required")
+    base = pinned_module(TASK / "closed-v9-retirement-inputs-v1" / "retire_closed_v9_resources_v1.py",
+                         "066c01769e9270e70fb202a10607aa29a2d92ed71a22fcdd576895c2cb06eb8c", "original_retirement")
+    scope = pinned_module(TASK / "final-gates-v10-fresh" / "private_run_scope.py",
+                          "1625254b763ba987fc65b3b9b3205cd85ad019d4f2492495ae8a1c68ee490d12", "identity_only")
+    result = {"schema": "native-rename-qualification-v2", "status": "IN_PROGRESS", "events": [],
+              "old_resources_accessed": False, "deletion_copy_replacement_acl_mutation": False}
+    # Exclusive publication is acquired before any fixture creation. No retry of
+    # an existing output or fixture is possible.
+    with OUTPUT.open("xb") as publication:
+        try:
+            with contextlib.ExitStack() as retained:
+                for path in list(reversed(FIXTURE.parent.parents)) + [FIXTURE.parent]:
+                    base.ordinary(path, True)
+                    retained.enter_context(base.open_locked_directory(scope, path))
+                FIXTURE.mkdir()
+                parent_handle = retained.enter_context(base.open_locked_directory(scope, FIXTURE))
+                source, collision, destination = (FIXTURE / x for x in ("source", "occupied", "moved"))
+                source.mkdir()
+                collision.mkdir()
+                original = retained.enter_context(base.open_locked_directory(scope, source, True))
+                before = base.identity(scope, original, source)
+                occupied = collision.stat()
+                result["original_identity"] = before
+                try:
+                    base.rename_original(scope, original, parent_handle, "relative-target")
+                except OSError as error:
+                    result["events"].append({"form": "relative_root_handle", "error": repr(error)})
+                    base.require(base.identity(scope, original, source) == before and not (FIXTURE / "relative-target").exists(),
+                                 "failed relative rename changed identity or path")
+                else:
+                    raise RuntimeError("relative form succeeded; qualification must be reviewed without replay")
+                try:
+                    rename_absolute(scope, original, collision)
+                except OSError as error:
+                    base.require(error.errno in (80, 183), "unexpected collision error")
+                    base.require(base.identity(scope, original, source) == before and collision.stat().st_ino == occupied.st_ino,
+                                 "existing target was changed")
+                    result["events"].append({"form": "absolute_existing_target", "error": repr(error), "both_unchanged": True})
+                else:
+                    raise RuntimeError("existing target was unexpectedly replaced")
+                rename_absolute(scope, original, destination)
+                after = base.identity(scope, original, destination)
+                base.require(after == before and not source.exists(), "absolute rename identity postcondition differs")
+                result["events"].append({"form": "absolute_new_target", "same_original_identity": True, "source_absent": True})
+            result["original_handles_closed"] = True
+            result["status"] = "PASS"
+        except BaseException as error:
+            result["status"], result["error"] = "FAIL", repr(error)
+            raise
+        finally:
+            raw = (json.dumps(result, indent=2) + "\n").encode("utf-8")
+            publication.write(raw)
+            publication.flush()
+            os.fsync(publication.fileno())
+    print(json.dumps(result), flush=True)
+
+
+if __name__ == "__main__":
+    main()

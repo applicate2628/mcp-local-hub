@@ -1,0 +1,6 @@
+# Preserve the exact bytes used by the reproducible source ledger on Windows.
+* text eol=lf
+*.patch -text
+# Unified-diff context prefixes and blank context lines are significant syntax.
+*.patch whitespace=-blank-at-eol,-space-before-tab
+resolutions/*.txt -text

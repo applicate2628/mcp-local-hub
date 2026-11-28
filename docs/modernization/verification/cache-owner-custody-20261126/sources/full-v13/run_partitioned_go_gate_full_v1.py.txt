@@ -1,0 +1,599 @@
+"""Partitioned Go coverage. Prepare/review only; execution needs root coordination.
+
+This records semantic package/test coverage. It never claims that the two literal
+CLAUDE.md pre-push commands passed or closes that separate pre-push requirement.
+"""
+import sys
+sys.dont_write_bytecode = True
+import argparse, collections, hashlib, importlib.util, json, os, re, subprocess, uuid
+from pathlib import Path
+
+REVIEW_COMPLETE = True
+if REVIEW_COMPLETE is not True:
+    raise RuntimeError("disabled task-bound draft: actual source admission and root review are pending")
+
+WORK = Path('<TASK>')
+HELPERS = WORK / 'final-gates-v8'
+CORE = Path('<TASK>\\final-gates-v13-root\\qualified_windows_products_consumer_v1.py')
+CORE_SHA = 'a19fde2ae8ee6a79f8afff37fd669707bd4ba1258edd779bfb1fb9d201d9db69'
+PEER_SOURCE = HELPERS / "qualified_api_peer_controller.go"
+PEER_SHA = '90ed49f229c411407fd8ce38d3c6f018780020e34f71419c52ef537a9de18b19'
+WINPS = Path(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe")
+WINPS_SHA = "75f490d70f821afbbbb28d8ae45fa712c0ef39f73832af5ff0df284beb22a9fc"
+IMPORT = "mcp-local-hub/"
+API, CLI, PROCESS = (IMPORT+"internal/"+name for name in ("api","cli","process"))
+JOB_TESTS = ("TestJob_BreakawayEnabledDescendantEscapesClose", "TestJobInformationTransportPreparationBoundary")
+NAMESPACE_TESTS = ("TestSecretsInit_RecoveryNamespaceBoundary", "TestSecretsInit_RecoveryNamespaceRetainedDirectory",
+                   "TestSecretsInit_RecoveryNamespaceFailurePaths")
+PEER_TESTS = ("TestSupervisorPeerStrictControlConnections",)
+NAME = re.compile(r"^(Test|Example|Fuzz|Benchmark)\w*$")
+TERMINAL = ("pass","fail","skip")
+
+def sha(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+if sha(CORE) != CORE_SHA:
+    raise SystemExit("reviewed qualified core changed")
+spec = importlib.util.spec_from_file_location("partitioned_qualified_core", CORE)
+core = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(core)
+RESOURCES = {API:core.REPO/"internal/api/zz_qualified_api_versioninfo_windows_amd64.syso",
+             CLI:core.CLI_SYSO}
+SOURCE_RESOURCES = (*RESOURCES.values(),core.PRODUCT_SYSO)
+
+def expression(names):
+    return "^("+"|".join(re.escape(name) for name in names)+")$"
+
+def command(run, argv, name, timeout=600, cwd=None, environment=None, stdin_path=None):
+    original = run.env
+    actual = dict(original)
+    if environment:
+        actual.update(environment)
+    if len(subprocess.list2cmdline([str(x) for x in argv]).encode("utf-16-le"))//2 >= 32767:
+        raise RuntimeError("command line exceeds Windows process limit")
+    before = len(run.receipt["commands"])
+    run.env = actual
+    try:
+        output = run.command(argv,name,cwd=cwd or core.REPO,timeout=timeout,check=False,stdin_path=stdin_path)
+        return output,run.receipt["commands"][-1]["exit_code"]
+    finally:
+        if len(run.receipt["commands"]) > before:
+            run.receipt["commands"][-1]["environment_overrides"] = environment or {}
+            run.save()
+        run.env = original
+
+def required(run, argv, name, **kwargs):
+    output,code = command(run,argv,name,**kwargs)
+    if code:
+        raise RuntimeError(name+" exited "+str(code))
+    return output
+
+def objects(text):
+    decoder = json.JSONDecoder()
+    rows,position = [],0
+    while position < len(text):
+        while position < len(text) and text[position].isspace():
+            position += 1
+        if position == len(text):
+            break
+        value,position = decoder.raw_decode(text,position)
+        rows.append(value)
+    return rows
+
+def events(text):
+    return [json.loads(line) for line in text.splitlines() if line.strip()]
+
+def package_manifest(run, packages, label, tagged=False):
+    argv = [core.GO,"list","-json=Dir,ImportPath,TestGoFiles,XTestGoFiles,SysoFiles,Error,Incomplete,DepsErrors"]
+    if tagged:
+        argv += ["-tags=test_state_path_env"]
+    rows = objects(required(run,[*argv,*packages],"packages-"+label,timeout=120))
+    result = {}
+    for row in rows:
+        package,directory = row["ImportPath"],core.ordinary(row["Dir"],True)
+        if row.get("Error") or package in result or not directory.is_relative_to(core.REPO):
+            raise RuntimeError("unexpected package manifest row")
+        result[package] = {"directory":str(directory),"test_go_files":row.get("TestGoFiles",[]),
+                           "external_test_go_files":row.get("XTestGoFiles",[])}
+    if not result:
+        raise RuntimeError("empty package manifest")
+    core.new_json(run.root/("packages-"+label+".json"),result)
+    return result
+
+def go_inventory(run, packages, label):
+    output = required(run,[core.GO,"test","-json","-list",".","-count=1","-p=1",*packages],
+                      "inventory-"+label,timeout=900)
+    expected = {package:[] for package in packages}
+    benchmarks = {package:[] for package in packages}
+    terminal,terminal_counts = {},collections.Counter()
+    for event in events(output):
+        package = event.get("Package")
+        if not event.get("Test") and event.get("Action") in TERMINAL:
+            terminal_counts[package] += 1
+            terminal[package] = event["Action"]
+        text = event.get("Output","").strip()
+        if package in expected and NAME.fullmatch(text):
+            target = benchmarks if text.startswith("Benchmark") else expected
+            if text in target[package]:
+                raise RuntimeError("duplicate inventory name: "+package+" "+text)
+            target[package].append(text)
+    if set(terminal)!=set(packages) or "fail" in terminal.values() or any(n!=1 for n in terminal_counts.values()):
+        raise RuntimeError("package inventory did not complete for every selected package")
+    return {"tests":{p:sorted(v) for p,v in expected.items()},"benchmarks":benchmarks,"package_terminal":terminal,
+            "package_terminal_counts":dict(terminal_counts)}
+
+def binary_inventory(run, package, executable, label, environment):
+    output = required(run,[executable,"-test.list=."],"inventory-"+label,
+                      cwd=core.REPO/"internal"/package.rsplit("/",1)[1],timeout=90,environment=environment)
+    tests,benchmarks = [],[]
+    for line in output.splitlines():
+        name = line.strip()
+        if NAME.fullmatch(name):
+            target = benchmarks if name.startswith("Benchmark") else tests
+            if name in target:
+                raise RuntimeError("duplicate binary inventory name")
+            target.append(name)
+    return {"tests":{package:sorted(tests)},"benchmarks":{package:sorted(benchmarks)}}
+
+def ledger(run, lane, expected, rows, exit_code, mandatory=()):
+    selected = {(p,t) for p,names in expected.items() for t in names}
+    outcomes,started,package_ends = {},collections.Counter(),{}
+    package_terminal_counts = collections.Counter()
+    duplicates = []
+    for event in rows:
+        package,test,action = event.get("Package"),event.get("Test"),event.get("Action")
+        if test:
+            key = (package,test)
+            if action == "run":
+                started[key] += 1
+            if action in TERMINAL:
+                if key in outcomes:
+                    duplicates.append(key)
+                outcomes[key] = action
+        elif action in TERMINAL:
+            package_terminal_counts[package] += 1
+            package_ends[package] = action
+    top = {key:action for key,action in outcomes.items() if "/" not in key[1]}
+    missing = sorted(selected-set(top))
+    unexpected = sorted(set(top)-selected)
+    unsettled = sorted(set(started)-set(outcomes))
+    terminal_without_start = sorted(set(outcomes)-set(started))
+    duplicate_start = sorted(key for key,count in started.items() if count!=1)
+    duplicate_package_terminal = sorted(p for p,n in package_terminal_counts.items() if n!=1)
+    missing_packages = sorted(set(expected)-set(package_ends))
+    unexpected_packages = sorted(set(package_ends)-set(expected))
+    unexpected_roots = sorted(key for key in outcomes if (key[0],key[1].split("/",1)[0]) not in selected)
+    required_passes = all(outcomes.get(key) == "pass" for key in mandatory)
+    passed = (exit_code == 0 and not missing and not unexpected and not duplicates and not unsettled
+              and not missing_packages and not unexpected_packages and not unexpected_roots and not duplicate_package_terminal
+              and not terminal_without_start and not duplicate_start and required_passes and "fail" not in outcomes.values()
+              and "fail" not in package_ends.values())
+    result = {"lane":lane,"expected":expected,"exit_code":exit_code,"passed":passed,
+              "top_level":[{"package":p,"test":t,"outcome":top.get((p,t),"NOT_RUN")} for p,t in sorted(selected)],
+              "all_terminal":[{"package":p,"test":t,"outcome":action} for (p,t),action in sorted(outcomes.items())],
+              "started_without_terminal":unsettled,"missing_top_level":missing,"unexpected_top_level":unexpected,
+              "duplicate_terminal":duplicates,"duplicate_start":duplicate_start,"terminal_without_start":terminal_without_start,
+              "missing_package_terminal":missing_packages,"unexpected_package_terminal":unexpected_packages,"unexpected_test_roots":unexpected_roots,
+              "package_terminal":package_ends,"package_terminal_counts":dict(package_terminal_counts),
+              "duplicate_package_terminal":duplicate_package_terminal,"mandatory_passes":[list(x) for x in mandatory],
+              "mandatory_passes_satisfied":required_passes}
+    run.receipt.setdefault("coverage",[]).append(result)
+    core.new_json(run.root/("coverage-"+lane+".json"),result)
+    run.save()
+    return passed
+
+def converted(run, raw, package, name):
+    return events(required(run,[core.GO,"tool","test2json","-p",package],name,timeout=30,stdin_path=raw))
+
+def path_tool_inventory(run):
+    # Match only the explicit PATH and Windows PATHEXT, never the ambient cwd.
+    directories = [core.ordinary(p,True) for p in run.env["PATH"].split(os.pathsep) if p]
+    raw_extensions = run.env.get("PATHEXT","")
+    extensions = [e.lower() if e.startswith(".") else "."+e.lower()
+                  for e in raw_extensions.split(";") if e] if raw_extensions else [".com",".exe",".bat",".cmd"]
+    found = {}
+    for name in ("mcp-language-server","gopls"):
+        row = {"present":False}
+        for directory in directories:
+            for extension in extensions or [""]:
+                candidate = directory/(name+extension)
+                if not candidate.exists() or candidate.is_dir():
+                    continue
+                configured = core.ordinary(candidate,False)
+                resolved = core.ordinary(configured.resolve(strict=True),False)
+                row = {"present":True,"configured":str(configured),"resolved":str(resolved),
+                       "bytes":resolved.stat().st_size,"sha256":sha(resolved)}
+                run.receipt["input_files"][str(resolved)] = row["sha256"]
+                break
+            if row["present"]:
+                break
+        found[name] = row
+    run.receipt["optional_path_tools"] = {"PATH":run.env["PATH"],"PATHEXT":raw_extensions,
+                                           "extensions":extensions,"tools":found}
+    return found
+
+def begin(args, lane, retain=None):
+    root = core.private_run(args.name)
+    env = core.clean_environment(root)
+    env.pop("MCPHUB_STATE_DIR_OVERRIDE",None)
+    env["GOFLAGS"] = "-mod=readonly -ldflags=-H=windowsgui"
+    env["PATH"] = os.pathsep.join((str(WINPS.parent),env["PATH"]))
+    run = core.Run(root,env)
+    if retain is not None:
+        retain(run)
+    run.receipt.update({"schema":"partitioned-go-gate-lane-v1","lane":lane,
+                       "literal_pre_push_commands_passed":False,
+                       "literal_pre_push_commands":[
+                           "go build ./... && go vet ./... && go test -count=1 -timeout 5m ./...",
+                           "go test -tags=test_state_path_env -count=1 -timeout 5m ./internal/api/ ./internal/cli/"],
+                       "ambient_opt_ins_absent":["MCPHUB_TARGET_SCHEDULER_QA","MCPHUB_GUI_SPAWN_TESTS"],
+                       "literal_pre_push_gate_status":"not claimed; this partitioned coverage does not close CLAUDE.md pre-push requirements"})
+    try:
+        input_files = [Path(__file__),CORE,core.HELPER,core.PROXY_ADMISSION,core.GO,core.GIT,core.CC,core.PWSH,WINPS,Path(sys.executable)]
+        input_files += [core.GO.parent.parent/"pkg/tool/windows_amd64"/(name+".exe") for name in ("compile","link","asm","cgo","vet")]
+        for relative in ("src/cmd/test2json","src/cmd/internal/test2json","src/cmd/pack"):
+            folder = core.GO.parent.parent/relative
+            if folder.exists():
+                input_files.extend(sorted(folder.rglob("*.go")))
+        run.receipt.setdefault("input_files", {}).update({str(p):sha(core.ordinary(p,False)) for p in input_files})
+        if run.receipt["input_files"][str(WINPS)] != WINPS_SHA:
+            raise RuntimeError("reviewed Windows PowerShell binary changed")
+        run.receipt["required_windows_powershell"] = {"path":str(WINPS),"sha256":WINPS_SHA,
+                                                     "PATH_directory":str(WINPS.parent)}
+        run.save()
+        path_tool_inventory(run)
+        before = core.source_snapshot(run,"before")
+        run.receipt["source_before"] = before
+        if before["head"] != args.commit or required(run,[core.GIT,"-C",core.REPO,"status","--porcelain"],"status-before",timeout=30).strip():
+            raise RuntimeError("clean exact committed source required")
+        if any(key in run.env for key in run.receipt["ambient_opt_ins_absent"]):
+            raise RuntimeError("ambient scheduler/GUI opt-in escaped environment sanitization")
+        for resource in SOURCE_RESOURCES:
+            if resource.exists():
+                raise RuntimeError("pre-existing source resource is not owned by this run")
+        (root/"bin").mkdir()
+        run.save()
+        return run
+    except BaseException as exc:
+        run.finish("FAIL",exc)
+        raise
+
+def finish(run):
+    same = core.source_snapshot(run,"after") == run.receipt["source_before"]
+    same = same and not any(p.exists() for p in SOURCE_RESOURCES)
+    run.receipt["source_unchanged"] = same
+    run.receipt["original_inputs_unchanged"] = all(sha(p)==h for p,h in run.receipt["input_files"].items())
+    if not same or not run.receipt["original_inputs_unchanged"]:
+        raise RuntimeError("source or input changed")
+    failures = run.receipt.get("phase_failures",[])
+    if failures or any(not row["passed"] for row in run.receipt.get("coverage",[])):
+        run.finish("FAIL",RuntimeError("coverage or phase failed; exact results retained"))
+        return 1
+    run.finish("PASS")
+    return 0
+
+def build_owner(run, package, name):
+    binary = run.root/"bin"/(name+".exe")
+    required(run,[core.GO,"build","-p=1","-mod=readonly","-trimpath=false","-ldflags=","-o",binary,package],
+             "compile-"+name,timeout=300)
+    run.receipt.setdefault("compiled_owners",{})[name] = {"path":str(binary),"sha256":sha(binary)}
+    run.receipt["input_files"][str(binary)] = sha(binary)
+    return binary
+
+def job_lane(run):
+    owner = build_owner(run,"./tools/test-job-entry","test-job-entry")
+    binary = run.root/"bin"/"process.test.exe"
+    required(run,[core.GO,"test","-c","-p=1","-mod=readonly","-trimpath=false","-ldflags=-H=windowsgui",
+                  "-o",binary,"./internal/process"],"compile-process-job-receiver",timeout=600)
+    run.receipt["input_files"][str(binary)] = sha(binary)
+    root = run.root/"process-job"
+    _,code = command(run,[owner,"-test-binary",binary,"-source-dir",core.REPO/"internal/process",
+                          "-run-root",root,"-timeout","90s"],"process-job-owner",timeout=120)
+    proof = json.loads((root/"result.json").read_text(encoding="utf-8"))
+    mandatory = [(PROCESS,t) for t in JOB_TESTS] + [(PROCESS,JOB_TESTS[1]+"/real-native-typed-gc-and-creator")]
+    proof_ok = (proof.get("success") is True and proof.get("originalWaitKnown") is True
+                and proof.get("originalExitCode") == 0 and proof.get("settlementComplete") is True
+                and proof.get("stdoutEOF") is True and proof.get("stderrEOF") is True
+                and set(proof.get("passed",[])) == {t for _,t in mandatory})
+    run.receipt["process_job_proof"] = {"path":str(root/"result.json"),"sha256":sha(root/"result.json"),"passed":proof_ok}
+    rows = converted(run,root/"stdout.log",PROCESS,"process-job-test2json")
+    ledger(run,"process-job",{PROCESS:list(JOB_TESTS)},rows,code if proof_ok else 1,mandatory)
+
+def ordinary(run):
+    manifest = package_manifest(run,["./..."],"default")
+    if not {API,CLI,PROCESS}.issubset(manifest):
+        raise RuntimeError("required package missing from frozen manifest")
+    packages = sorted(set(manifest)-{API,CLI})
+    inventory = go_inventory(run,packages,"ordinary")
+    for name in JOB_TESTS:
+        if name not in inventory["tests"][PROCESS]:
+            raise RuntimeError("original process Job test missing from inventory")
+    assignments = {p:{name:("process-job" if p==PROCESS and name in JOB_TESTS else "ordinary-process" if p==PROCESS else "ordinary")
+                      for name in names} for p,names in inventory["tests"].items()}
+    run.receipt.update({"package_manifest":manifest,"inventory":inventory,"assignments":assignments,
+                        "deferred_packages":{API:"qualified default/state plus namespace/peer owners",CLI:"qualified default/state"},
+                        "phase_failures":[],"phase_results":{}})
+    core.new_json(run.root/"coverage-manifest.json",{"packages":manifest,"inventory":inventory,"assignments":assignments,
+                                                  "deferred_packages":run.receipt["deferred_packages"]})
+    for phase in ("build","vet"):
+        _,code = command(run,[core.GO,phase,"-p=1","./..."],"all-"+phase,timeout=900)
+        run.receipt["phase_results"][phase] = code
+        if code:
+            run.receipt["phase_failures"].append({"phase":phase,"exit_code":code})
+    other = sorted(set(packages)-{PROCESS})
+    if other:
+        output,code = command(run,[core.GO,"test","-json","-count=1","-p=1","-timeout=5m",*other],
+                              "ordinary-tests",timeout=max(600,320*len(other)))
+        ledger(run,"ordinary",{p:inventory["tests"][p] for p in other},events(output),code)
+    output,code = command(run,[core.GO,"test","-json","-count=1","-p=1","-timeout=5m",
+                              "-skip="+expression(JOB_TESTS),PROCESS],"ordinary-process",timeout=360)
+    ledger(run,"ordinary-process",{PROCESS:[n for n in inventory["tests"][PROCESS] if n not in JOB_TESTS]},events(output),code)
+    job_lane(run)
+    return finish(run)
+
+def restore_resource(run, path, digest):
+    if path not in RESOURCES.values() or sha(core.ordinary(path,False)) != digest:
+        raise RuntimeError("owned source resource changed; retained for review")
+    identity = uuid.uuid4().hex
+    preserved = run.root/"resource-cleanup-evidence"/identity/path.name
+    trash = core.WORK/"trash"/("full-go-"+run.root.name)/identity/path.name
+    core.copy_file(path,preserved)
+    trash.parent.mkdir(parents=True,exist_ok=False)
+    path.rename(trash)
+    if path.exists() or sha(preserved)!=digest or sha(trash)!=digest:
+        raise RuntimeError("source resource restoration did not preserve original bytes")
+    row = {"source":str(path),"preserved":str(preserved),"trash":str(trash),"sha256":digest}
+    run.receipt.setdefault("resource_cleanup",[]).append(row)
+    core.new_json(run.root/"resource-cleanup-records"/(identity+".json"),row)
+
+def qualified_bundle(run, package, built_root, built, tagged):
+    name = package.rsplit("/",1)[1]+("-state" if tagged else "-default")
+    bundle = run.root/(name+"-bundle")
+    bundle.mkdir()
+    actual = Path(built["actual_product"]["path"])
+    for relative in core.BUNDLE_FILES:
+        if relative not in ("mcphub-product/mcphub.exe","windows-product-identity.json"):
+            core.copy_file(actual/relative,bundle/relative)
+    resource = core.ordinary(built_root/"resources/product-versioninfo.syso",False)
+    if sha(resource) != built["resource_sha256"] or any(p.exists() for p in RESOURCES.values()):
+        raise RuntimeError("resource input changed or another package resource is staged")
+    plan = built["build_plan"]
+    flags = " ".join(["-H=windowsgui","-X mcp-local-hub/internal/buildinfo.version="+plan["version"],
+                      "-X mcp-local-hub/internal/buildinfo.commit="+plan["commit"],
+                      "-X mcp-local-hub/internal/buildinfo.date="+plan["buildDate"]])
+    executable = bundle/"mcphub-product/mcphub.exe"
+    digest = core.copy_file(resource,RESOURCES[package])
+    try:
+        argv = [core.GO,"test","-c","-p=1","-mod=readonly","-trimpath=false","-ldflags",flags,"-o",executable]
+        if tagged:
+            argv += ["-tags=test_state_path_env"]
+        required(run,[*argv,package],"compile-"+name,timeout=600)
+    finally:
+        restore_resource(run,RESOURCES[package],digest)
+    identity = run.validator(["--candidate",str(executable),"--expected-version",plan["version"],
+                              "--expected-commit",plan["commit"],"--expected-build-date",plan["buildDate"]],name+"-product-identity")
+    core.new_json(bundle/"windows-product-identity.json",identity)
+    record = core.bundle_admission(run,bundle,plan,name,built["native_input_sha256"])
+    record.update({"product_rust_marked":False,"test_build_tags":["test_state_path_env"] if tagged else [],
+                   "compile_trimpath":False})
+    run.receipt.setdefault("qualified_bundles",{})[package] = record
+    for relative,measurement in record["files"].items():
+        run.receipt["input_files"][str(bundle/relative)] = measurement["sha256"]
+    run.receipt["input_files"][record["fixture"]] = sha(record["fixture"])
+    return executable,record
+
+def canonical_environment(record):
+    return {"MCPHUB_CANONICAL_ENTRY_FIXTURE":record["fixture"],"MCPHUB_CANONICAL_FIXTURE_TEST_PRODUCT":"1",
+            "MCPHUB_CANONICAL_ENTRY_FIXTURE_REQUIRED":"1","MCPHUB_CANONICAL_COMMAND_FIXTURE_REQUIRED":"1"}
+
+def namespace_lane(run, tagged, expected):
+    owner = build_owner(run,"./tools/test-recovery-namespace","test-recovery-namespace")
+    parent = run.root/"namespace-parent"
+    parent.mkdir()
+    argv = [owner,"-repo",core.REPO,"-go",core.GO,"-pwsh",core.PWSH,"-parent",parent,
+            "-build-timeout","5m","-test-timeout","3m"]
+    if tagged:
+        argv.append("--test-state-path-env")
+    _,code = command(run,argv,"namespace-owner",timeout=510)
+    roots = sorted(parent.iterdir())
+    if len(roots)!=1 or not roots[0].is_dir():
+        raise RuntimeError("namespace owner did not retain exactly one original evidence root")
+    root = roots[0]
+    inputs = json.loads((root/"proof/inputs.json").read_text(encoding="utf-8"))
+    proof = json.loads((root/"proof/tests.settlement.json").read_text(encoding="utf-8"))
+    proof_ok = inputs.get("test_state_path_env") is tagged and proof.get("complete") is True and not proof.get("failure")
+    actual_args = inputs.get("build_argv",[])
+    proof_ok = proof_ok and ("-tags=test_state_path_env" in actual_args) == tagged
+    run.receipt["namespace_proof"] = {"root":str(root),"inputs_sha256":sha(root/"proof/inputs.json"),
+                                    "settlement_sha256":sha(root/"proof/tests.settlement.json"),"passed":proof_ok}
+    rows = converted(run,root/"proof/tests.stdout.log",API,"namespace-test2json")
+    ledger(run,"api-namespace",{API:list(expected)},rows,code if proof_ok else 1,[(API,t) for t in expected])
+
+def peer_lane(run, executable, record):
+    if sha(core.ordinary(PEER_SOURCE,False)) != PEER_SHA:
+        raise RuntimeError("reviewed peer controller source changed")
+    artifact = core.REPO/".scratch"/("qualified-"+run.root.name+"-peer")
+    security = core.scope_helper().create_private_artifact_scope(artifact)
+    core.new_json(run.root/"peer-source-scope-security.json",security)
+    core.copy_file(PEER_SOURCE,artifact/"main.go")
+    run.receipt["input_files"][str(PEER_SOURCE)] = PEER_SHA
+    run.receipt["input_files"][str(artifact/"main.go")] = PEER_SHA
+    owner = build_owner(run,"./.scratch/"+artifact.name,"qualified-api-peer")
+    root = run.root/"api-peer"
+    _,code = command(run,[owner,"-test-binary",executable,"-source-dir",core.REPO/"internal/api",
+                          "-run-root",root,"-timeout","90s"],"api-peer-owner",timeout=120,
+                          environment=canonical_environment(record))
+    proof = json.loads((root/"result.json").read_text(encoding="utf-8"))
+    proof_ok = (proof.get("schema")=="api-peer-transport-run-v1" and proof.get("root_wait_known") is True
+                and proof.get("root_exit_code")==0 and proof.get("settlement_complete") is True
+                and proof.get("selected_test_passed") is True and proof.get("binary_unchanged") is True
+                and proof.get("binary_sha256")==sha(executable) and not proof.get("failure"))
+    run.receipt["peer_proof"] = {"path":str(root/"result.json"),"sha256":sha(root/"result.json"),"passed":proof_ok}
+    rows = converted(run,root/"stdout.raw",API,"api-peer-test2json")
+    ledger(run,"api-peer",{API:list(PEER_TESTS)},rows,code if proof_ok else 1,[(API,t) for t in PEER_TESTS])
+
+def qualified(run, args):
+    run.env["MCPHUB_E2E_SCHEDULER"] = "none"
+    run.receipt["environment"]["MCPHUB_E2E_SCHEDULER"] = "none"
+    run.save()
+    tagged = args.lane=="qualified-state"
+    original,built,_ = core.received_bundle(args,"actual_product")
+    if built["source_before"] != run.receipt["source_before"]:
+        raise RuntimeError("qualified tests require the exact completed Product source snapshot")
+    run.receipt.update({"build_run":str(original),"build_receipt_sha256":sha(original/"receipt.json"),
+                        "build_tags":["test_state_path_env"] if tagged else [],"phase_failures":[]})
+    run.receipt["input_files"][str(original/"receipt.json")] = sha(original/"receipt.json")
+    actual_root = Path(built["actual_product"]["path"])
+    for relative,measurement in built["actual_product"]["files"].items():
+        run.receipt["input_files"][str(actual_root/relative)] = measurement["sha256"]
+    run.receipt["input_files"][str(original/"resources/product-versioninfo.syso")] = built["resource_sha256"]
+    receiving = {}
+    if tagged:
+        plan = built["build_plan"]
+        if not plan["testOnly"] or plan["buildTags"] != ["test_state_path_env"]:
+            raise RuntimeError("tagged API receiving needs the actual isolated Product")
+        actor = core.ordinary(actual_root/"mcphub-product/mcphub.exe",False)
+        if not actor.is_relative_to(original) or sha(actor) != built["actual_product"]["files"]["mcphub-product/mcphub.exe"]["sha256"]:
+            raise RuntimeError("actual receiving Product differs from its admitted bundle")
+        receiving = {"MCPHUB_ATTACH_TEST_BIN":str(actor),"MCPHUB_ATTACH_TEST_BIN_SHA256":sha(actor)}
+        run.receipt["actual_product_receiving"] = {
+            "test":"TestAttachExisting_PublicCLIReceiving","environment":receiving,
+            "fixture_source":"internal/api/attach_client_public_cli_receiving_windows_test.go",
+            "scope":"tagged API only; actual isolated Product attach-client codegraph plan/apply/rollback in test-owned paths"}
+    manifest = package_manifest(run,[API,CLI],"state" if tagged else "default",tagged)
+    inventories,assignments,bundles,environments = {},{},{},{}
+    for package in (API,CLI):
+        executable,record = qualified_bundle(run,package,original,built,tagged)
+        bundles[package] = (executable,record)
+        environments[package] = canonical_environment(record)
+        if package == API:
+            environments[package].update(receiving)
+        inv = binary_inventory(run,package,executable,package.rsplit("/",1)[1],environments[package])
+        inventories[package] = inv
+        names = inv["tests"][package]
+        special = NAMESPACE_TESTS+PEER_TESTS if package==API else ()
+        if not set(special).issubset(names):
+            raise RuntimeError("mandatory API tests are missing from inventory")
+        if package == API and ("TestAttachExisting_PublicCLIReceiving" in names) != tagged:
+            raise RuntimeError("public receiving test build-tag inventory disagrees")
+        assignments[package] = {name:("api-namespace" if name in NAMESPACE_TESTS else "api-peer" if name in PEER_TESTS
+                                      else "qualified-"+package.rsplit("/",1)[1]) for name in names}
+    run.receipt.update({"package_manifest":manifest,"inventory":inventories,"assignments":assignments})
+    core.new_json(run.root/"coverage-manifest.json",{"packages":manifest,"inventories":inventories,"assignments":assignments,
+                                                  "build_tags":run.receipt["build_tags"]})
+    for package in (API,CLI):
+        executable,record = bundles[package]
+        special = NAMESPACE_TESTS+PEER_TESTS if package==API else ()
+        selected = [n for n in inventories[package]["tests"][package] if n not in special]
+        label = "qualified-"+package.rsplit("/",1)[1]
+        argv = [executable,"-test.v=test2json","-test.count=1","-test.timeout=5m","-test.run=."]
+        if special:
+            argv.append("-test.skip="+expression(special))
+        _,code = command(run,argv,label,cwd=Path(manifest[package]["directory"]),timeout=330,
+                          environment=environments[package])
+        rows = converted(run,run.root/(label+".stdout.txt"),package,label+"-test2json")
+        mandatory = [(API,"TestAttachExisting_PublicCLIReceiving")] if tagged and package==API else []
+        ledger(run,label,{package:selected},rows,code,mandatory)
+    namespace_lane(run,tagged,NAMESPACE_TESTS)
+    peer_lane(run,*bundles[API])
+    for package,(_,record) in bundles.items():
+        if core.tree(Path(record["path"])) != record["files"]:
+            raise RuntimeError("qualified bundle changed during its tests")
+    run.receipt["qualified_bundles_unchanged"] = True
+    return finish(run)
+
+def collect(args, run):
+    receipts = {}
+    for lane,path in (("ordinary",args.ordinary_run),("qualified-default",args.default_run),("qualified-state",args.state_run)):
+        path = core.ordinary(Path(path),True)
+        if path.parent != core.RUNS:
+            raise RuntimeError("only an original private lane run is accepted")
+        receipt = json.loads((path/"receipt.json").read_text(encoding="utf-8"))
+        if receipt.get("schema")!="partitioned-go-gate-lane-v1" or receipt.get("lane")!=lane:
+            raise RuntimeError("unexpected lane receipt")
+        receipts[lane] = {"path":str(path),"sha256":sha(path/"receipt.json"),"receipt":receipt}
+        run.receipt["input_files"][str(path/"receipt.json")] = sha(path/"receipt.json")
+        for input_path,digest in receipt.get("input_files",{}).items():
+            if sha(core.ordinary(input_path,False)) != digest:
+                raise RuntimeError("a completed lane input changed")
+            run.receipt["input_files"][input_path] = digest
+    sources = [v["receipt"]["source_before"] for v in receipts.values()]
+    if any(source!=run.receipt["source_before"] for source in sources):
+        raise RuntimeError("lane source snapshots differ from the current exact committed tree")
+    packages = set(receipts["ordinary"]["receipt"]["package_manifest"])
+    default = set(receipts["qualified-default"]["receipt"]["package_manifest"])
+    state = set(receipts["qualified-state"]["receipt"]["package_manifest"])
+    passed = default==state=={API,CLI} and {API,CLI,PROCESS}.issubset(packages)
+    passed = passed and receipts["ordinary"]["receipt"].get("phase_results")=={"build":0,"vet":0}
+    rows,planned = [],{}
+    for lane,value in receipts.items():
+        receipt = value["receipt"]
+        tags = ("test_state_path_env",) if lane=="qualified-state" else ()
+        assigned = receipt["assignments"]
+        expected_packages = packages-{API,CLI} if lane=="ordinary" else {API,CLI}
+        if set(assigned)!=expected_packages:
+            passed = False
+        for package,names in assigned.items():
+            for name,owner in names.items():
+                key = (tags,package,name)
+                if key in planned:
+                    passed = False
+                planned[key] = owner
+        passed = passed and receipt.get("status")=="PASS" and receipt.get("source_unchanged") is True and receipt.get("original_inputs_unchanged") is True
+        covered_packages = set()
+        for coverage in receipt.get("coverage",[]):
+            passed = passed and coverage["passed"]
+            covered_packages.update(coverage["expected"])
+            rows += [dict(row,build_tags=list(tags),lane=coverage["lane"]) for row in coverage["top_level"]]
+        if covered_packages!=expected_packages:
+            passed = False
+    counts = collections.Counter((tuple(row["build_tags"]),row["package"],row["test"]) for row in rows)
+    if any(count!=1 for count in counts.values()) or set(counts)!=set(planned):
+        passed = False
+    for row in rows:
+        if row["lane"] != planned.get((tuple(row["build_tags"]),row["package"],row["test"])):
+            passed = False
+    run.receipt.update({"schema":"partitioned-go-gate-aggregate-v1","commit":args.commit,
+        "lane_receipts":{k:{"path":v["path"],"sha256":v["sha256"]} for k,v in receipts.items()},
+        "default_packages":sorted(packages),"state_packages":sorted(state),"top_level_ledger":rows,
+        "phase_failures":[] if passed else [{"phase":"aggregate","reason":"coverage, lane integrity or phase failed"}],
+        "literal_pre_push_commands_passed":False,
+        "literal_pre_push_gate_status":"not claimed; independent root verification and CLAUDE.md literal commands remain required"})
+    return finish(run)
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest="action",required=True)
+    execute = sub.add_parser("lane")
+    execute.add_argument("--name",required=True,type=core.scope_name)
+    execute.add_argument("--commit",required=True)
+    execute.add_argument("--lane",required=True,choices=("ordinary","qualified-default","qualified-state"))
+    execute.add_argument("--build-run")
+    aggregate = sub.add_parser("collect")
+    aggregate.add_argument("--name",required=True,type=core.scope_name)
+    aggregate.add_argument("--commit",required=True)
+    for name in ("ordinary-run","default-run","state-run"):
+        aggregate.add_argument("--"+name,required=True)
+    args = parser.parse_args()
+    if not re.fullmatch("[0-9a-f]{40}",args.commit) or len(args.name)>55:
+        parser.error("full lowercase commit and short fresh private name required")
+    if args.action=="lane" and args.lane!="ordinary" and not args.build_run:
+        parser.error("qualified lanes need the exact completed Product build run")
+    run = None
+    try:
+        run = begin(args,"aggregate" if args.action=="collect" else args.lane)
+        if args.action=="collect":
+            return collect(args,run)
+        return ordinary(run) if args.lane=="ordinary" else qualified(run,args)
+    except BaseException as exc:
+        if run is not None:
+            try:
+                run.receipt["source_after_failure"] = core.source_snapshot(run,"after-failure")
+                run.receipt["pending_source_resources"] = [str(p) for p in SOURCE_RESOURCES if p.exists()]
+            except BaseException as observed:
+                run.receipt["observation_error"] = type(observed).__name__+": "+str(observed)
+            run.finish("FAIL",exc)
+        raise
+
+if __name__=="__main__":
+    raise SystemExit(main())

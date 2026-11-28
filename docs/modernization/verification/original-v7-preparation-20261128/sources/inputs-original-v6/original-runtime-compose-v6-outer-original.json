@@ -1,0 +1,14 @@
+{
+    "schema":  "original-runtime-composition-original-parent-v6",
+    "plan_sha256":  "1f16a94cbf4c9e98c35a170395596f2feabc1b313bc6b9dc29c0894d35a9eb89",
+    "same_process_start_object":  true,
+    "original_pid":  448380,
+    "exit_code":  0,
+    "wait_returned":  true,
+    "original_process_object_disposed":  true,
+    "new_job_or_tree_wait":  false,
+    "create_no_window":  true,
+    "wait_errors":  [
+
+                    ]
+}

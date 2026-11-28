@@ -1287,9 +1287,26 @@ func TestExecuteBlockingPostCommitAuditCannotPreemptRespawn(t *testing.T) {
 		t.Fatalf("hold audit flock: %v", err)
 	}
 	locked := true
+	done := make(chan struct{})
+	var executeErr error
+	returned := false
+	observed := false
 	defer func() {
 		if locked {
-			_ = auditLock.Unlock()
+			if err := auditLock.Unlock(); err != nil {
+				t.Errorf("release audit flock during cleanup: %v", err)
+			}
+		}
+		// Release the original flock before joining this Execute call, even
+		// after Fatal. The package deadline bounds a genuinely stuck owner;
+		// TempDir cleanup must not run while that owner can still write.
+		<-done
+		if !observed {
+			if !returned {
+				t.Error("recovery exited without an execution result during cleanup")
+			} else if executeErr != nil {
+				t.Errorf("recovery completion during cleanup: %v", executeErr)
+			}
 		}
 	}()
 
@@ -1308,10 +1325,10 @@ func TestExecuteBlockingPostCommitAuditCannotPreemptRespawn(t *testing.T) {
 		close(respawnDispatched)
 		return api.RespawnResult{Success: true}, nil
 	}
-	done := make(chan error, 1)
 	go func() {
-		_, executeErr := ExecuteWithDependencies(context.Background(), d.TaskName, Options{Confirmed: true}, deps)
-		done <- executeErr
+		defer close(done)
+		_, executeErr = ExecuteWithDependencies(context.Background(), d.TaskName, Options{Confirmed: true}, deps)
+		returned = true
 	}()
 
 	select {
@@ -1320,7 +1337,11 @@ func TestExecuteBlockingPostCommitAuditCannotPreemptRespawn(t *testing.T) {
 		t.Fatal("respawn was not dispatched while the post-commit audit flock was held")
 	}
 	select {
-	case executeErr := <-done:
+	case <-done:
+		observed = true
+		if !returned {
+			t.Fatal("recovery exited without an execution result")
+		}
 		if executeErr != nil {
 			t.Fatalf("ExecuteWithDependencies: %v", executeErr)
 		}

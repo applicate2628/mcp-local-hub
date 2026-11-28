@@ -1,0 +1,33 @@
+{
+  "scope": "DATA-only receiver checks; no native execution or capture I/O",
+  "runner_sha256": "6d16652d4893273b7e9d584920892ce5f5917622e7e242a62eb78ec824bcfb93",
+  "plan_sha256": "d4800aab5b76dfab8b7f63e9c461458a30506d8706980e280367e19318dff1c2",
+  "execution_sha256": "cd7c448f1c3cf337e13e4ad77001c6692627e639624f70ede09cd8a9b08d1562",
+  "original_receipt_received_as": "FAIL",
+  "accepted_synthetic_closed_failure_codes": [
+    0,
+    3221684229,
+    4294967295
+  ],
+  "rejected_cases": [
+    "old_signed_error",
+    "error_above_uint32",
+    "boolean_error",
+    "missing_creation_fact",
+    "creation_not_attempted",
+    "process_was_created",
+    "unclosed_handle",
+    "nonempty_job",
+    "native_error",
+    "invented_exit",
+    "invented_pid",
+    "readers_started",
+    "capture_measured",
+    "resumed_command",
+    "unresolved_state",
+    "false_success",
+    "nonterminal_position",
+    "mismatched_proof"
+  ],
+  "result": "PASS"
+}

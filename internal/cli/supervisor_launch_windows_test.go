@@ -391,7 +391,7 @@ func TestSupervisorLaunchStalledCreatorCleanup(t *testing.T) {
 	}
 	// Creator mechanics are contained by QA's existing Job; breakaway policy is
 	// independently covered by the unchanged producer/native Product oracle.
-	for _, scenario := range []string{"complete-dependencies", "missing-captured-reader"} {
+	for _, scenario := range []string{"complete-dependencies", "missing-captured-reader", "accepted-control"} {
 		t.Run(scenario, func(t *testing.T) {
 			stateDir := t.TempDir()
 			deps, err := buildV5UpgradeDeps(exe, stateDir).supervisorLaunchDependencies()
@@ -432,7 +432,7 @@ func TestSupervisorLaunchStalledCreatorCleanup(t *testing.T) {
 			if scenario == "missing-captured-reader" && err == nil {
 				t.Fatal("post-creation dependency omission accepted")
 			}
-			if scenario == "complete-dependencies" && err != nil {
+			if scenario != "missing-captured-reader" && err != nil {
 				t.Fatal(err)
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
@@ -444,6 +444,31 @@ func TestSupervisorLaunchStalledCreatorCleanup(t *testing.T) {
 			foreign := api.SupervisorLockOwner{PID: os.Getpid(), StartedAt: time.Now().UTC().Format(time.RFC3339Nano)}
 			if err := api.WriteStateFileAtomic(filepath.Join(stateDir, "supervisor.lock.owner.json"), foreign); err != nil {
 				t.Fatal(err)
+			}
+			controlCalls := 0
+			if scenario == "accepted-control" {
+				// Model the already accepted private binding. The command below
+				// is a stalled fixture, so this is not native supervisor admission.
+				accepted := api.SupervisorLockOwner{PID: launch.original.PID, StartedAt: launch.original.StartedAt.UTC().Format(time.RFC3339Nano)}
+				launch.proof = &supervisorControlProof{
+					issuer: launch, creator: cmd.Process, owner: accepted, peer: launch.peer,
+					expected: supervisorExpectation(stateDir, exe, strings.Repeat("a", 64)),
+				}
+				launch.deps.readOwner = func(string) (api.SupervisorLockOwner, error) {
+					return api.SupervisorLockOwner{}, errors.New("accepted creator must not reacquire control from the current sidecar")
+				}
+				launch.deps.sendIPCPeer = func(_ context.Context, pipe string, owner api.SupervisorLockOwner, peer api.SupervisorProcessIdentityV1, command string, _ map[string]any, _ time.Duration) (api.IPCResponse, error) {
+					controlCalls++
+					if pipe != deps.pipePath || owner != accepted || peer != launch.peer || command != "exit" {
+						return api.IPCResponse{}, errors.New("accepted original peer operands changed")
+					}
+					// The strict sender's successful exit is modeled by stopping only
+					// the retained original fixture; Abort still owns its sole Wait.
+					if err := cmd.Process.Kill(); err != nil {
+						return api.IPCResponse{}, err
+					}
+					return api.IPCResponse{OK: true, Final: true}, nil
+				}
 			}
 			var callers sync.WaitGroup
 			results := make(chan error, 3)
@@ -457,6 +482,9 @@ func TestSupervisorLaunchStalledCreatorCleanup(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+			}
+			if scenario == "accepted-control" && controlCalls != 1 {
+				t.Fatalf("accepted original exit requests = %d, want one", controlCalls)
 			}
 			if cmd.ProcessState == nil || !cmd.ProcessState.Exited() {
 				t.Fatalf("original creator was not reaped: %v", cmd.ProcessState)

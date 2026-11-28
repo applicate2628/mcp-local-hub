@@ -1,0 +1,46 @@
+{
+  "schema": "original-literal-original-parent-v6",
+  "state": "received",
+  "source_commit": "727d66753814dc218e26d699e57402db2d13190a",
+  "runtime_manifest": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\runtime-original-v6\\runtime-manifest.json",
+    "sha256": "cdce3127e6237f5157500acbf206d0fced239ef60b208744278a0059758e692d"
+  },
+  "configuration": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\runtime-original-v6\\runtime-inputs.json",
+    "sha256": "037d4ad93bc93dcf531669eaaa90be32154c1ba34af6f50528eaa03e9f9ef4a2"
+  },
+  "argv": [
+    "@@RECOVERY_NATIVE_USER_PROFILE_JSON@@\\AppData\\Local\\Python\\pythoncore-3.15-64\\python.exe",
+    "-I",
+    "-S",
+    "-B",
+    "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\inputs-original-v6\\runtime-original-v6\\run_literal_go_gate_v6.py",
+    "--name",
+    "original-literal-full-v6",
+    "--commit",
+    "727d66753814dc218e26d699e57402db2d13190a"
+  ],
+  "cwd": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1",
+  "outside_enclosing_job": true,
+  "terminal_exit_received": true,
+  "deadline_exceeded": false,
+  "parent_capture_files_closed": true,
+  "physical_complete": true,
+  "stdout": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-literal-full-v6-parent.stdout.txt",
+  "stderr": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\original-literal-full-v6-parent.stderr.txt",
+  "original_failure_reclassified": false,
+  "original_pid": 221948,
+  "exit_code": 1,
+  "seconds": 1890.7661419000942,
+  "child_status": "FAIL",
+  "commands_quiescent": true,
+  "child_schema": "literal-go-prepush-gate-v1",
+  "candidate_commit": "727d66753814dc218e26d699e57402db2d13190a",
+  "literal_pre_push_commands_passed": false,
+  "original_receipt": {
+    "path": "@@RECOVERY_APPROVED_WORK_AREA_JSON@@\\mcp-acceptance-rebuild-20261127-v1\\literal-original-runs-v6\\original-literal-full-v6\\receipt.json",
+    "sha256": "6cd606a5ec4e6e1a3e74d4b8324786cc98dffe8cd587f4a41c89a751ea7f0c4a"
+  },
+  "status": "FAIL"
+}

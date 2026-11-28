@@ -1,0 +1,151 @@
+"""Deterministic external-timeout regression; actual guard/stdlib, fake process only.
+
+No child process, Windows API, existing run, or capture/source/cache is accessed.
+This proves retention at the Python boundary, not external native/IO closure.
+"""
+import sys
+sys.dont_write_bytecode = True
+
+import argparse
+import hashlib
+import importlib.util
+import inspect
+import json
+from pathlib import Path
+import subprocess
+import time
+import types
+
+
+def probe(guard_path, out):
+    spec = importlib.util.spec_from_file_location("external_candidate_guard", guard_path)
+    guard = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(guard)
+    guard.load_original_owner = lambda: None
+    processes, hashes, received_rows = [], [], []
+    nested_closed = False
+
+    def receive_physical(row, exit_code):
+        received_rows.append(row)
+        assert type(exit_code) is int and exit_code == 1
+        return {"physical_complete": nested_closed, "source": "model original nested completion"}
+
+    class Process:
+        def __init__(self, argv, **kwargs):
+            self.args, self.kwargs = argv, kwargs
+            self.pid, self.returncode = -1, None  # A model identity; no OS PID exists.
+            self.kills, self.waits, self.communicates = 0, [], []
+            self.expired = subprocess.TimeoutExpired(argv, 320)
+            processes.append(self)
+
+        def communicate(self, input=None, timeout=None):
+            self.communicates.append(timeout)
+            if self.returncode is None:
+                raise self.expired
+            return None, None
+
+        def wait(self, timeout=None):
+            self.waits.append(timeout)
+            if self.returncode is None:
+                raise self.expired
+            return self.returncode
+
+        def kill(self):
+            self.kills += 1
+            self.returncode = 1
+
+        def poll(self):
+            return self.returncode
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *unused):
+            self.wait()
+
+    # Execute this runtime's unchanged stdlib run() against only our model.
+    # Windows selects a second communicate after kill; it creates no OS worker.
+    stdlib_run = types.FunctionType(subprocess.run.__code__,
+        {**subprocess.run.__globals__, "Popen": Process, "_mswindows": True},
+        argdefs=subprocess.run.__defaults__)
+    stdlib_run.__kwdefaults__ = subprocess.run.__kwdefaults__
+
+    class CoreRun:
+        def __init__(self, root, env):
+            self.root, self.env = root, env
+            self.receipt = {"commands": []}
+
+        def save(self):
+            pass
+
+    core = types.SimpleNamespace(Run=CoreRun, REPO=out, sha=lambda p: hashes.append(str(p)),
+        subprocess=types.SimpleNamespace(run=stdlib_run, Popen=Process,
+            CREATE_NO_WINDOW=0x08000000, DEVNULL=subprocess.DEVNULL,
+            TimeoutExpired=subprocess.TimeoutExpired))
+    run = guard.make_guarded_run_class(core)(out, {})
+    caught = None
+    registered = "physical_receiver" in inspect.signature(run.command).parameters
+    options = {"physical_receiver": receive_physical} if registered else {}
+    try:
+        run.command(["controller-model"], "suite-owner", timeout=320, check=False, defer_output=True, **options)
+    except BaseException as error:
+        caught = error
+    process = processes[0]
+    row = run.receipt["commands"][0]
+    matches = [c for c in guard.RETAINED_COMMANDS if c.get("run") is run and c.get("row") is row]
+    before = run.quiescence_snapshot()
+    physical = run.receive_failed_worker_closure(time.monotonic())
+    blocked = False
+    try:
+        run.command(["must-not-start"], "successor", defer_output=True)
+    except RuntimeError:
+        blocked = len(processes) == 1
+
+    facts = {
+        "same_timeout_exception": caught is process.expired,
+        "no_controller_kill": process.kills == 0,
+        "same_original_process_retained": len(matches) == 1 and matches[0].get("original") is process
+            and any(p is process for p in guard.RETAINED_PROCESS_OWNERS),
+        "original_capture_handles_retained_open": all(not process.kwargs[s].closed for s in ("stdout", "stderr")),
+        "original_failure_unchanged": row["quiescence_state"] == "unknown" and run.quiescence_snapshot() == before,
+        "no_false_external_closure": physical["status"] == "UNKNOWN" and physical["capture_access_issued"] is False,
+        "no_capture_hashes": not hashes and row["captures_measured"] is False,
+        "successor_refused": blocked,
+    }
+    # A direct exit alone must not release files or claim nested closure.
+    process.returncode = 1
+    rejected = run.receive_failed_worker_closure(time.monotonic() + 1)
+    facts["incomplete_nested_proof_refused"] = (rejected["status"] == "UNKNOWN"
+        and all(not process.kwargs[s].closed for s in ("stdout", "stderr")))
+    nested_closed = True
+    completed = run.receive_failed_worker_closure(time.monotonic() + 1)
+    facts.update(receiver_bound_before_launch=registered,
+        same_original_row_received=bool(received_rows) and all(value is row for value in received_rows),
+        late_physical_closure_received=completed["status"] == "CLOSED",
+        original_failure_unchanged_after_closure=run.quiescence_snapshot() == before,
+        capture_handles_closed_after_proof=all(process.kwargs[s].closed for s in ("stdout", "stderr")),
+        late_closure_grants_nothing=all(completed[key] is False for key in
+            ("qualification_passed", "capture_access_issued", "new_commands_permitted")) and not hashes)
+    result = {"schema": "external-python-timeout-model-v1", "status": "PASS" if all(facts.values()) else "FAIL",
+        "guard_sha256": hashlib.sha256(guard_path.read_bytes()).hexdigest(), "facts": facts,
+        "model_calls": {"kill": process.kills, "wait_timeouts": process.waits,
+                        "communicate_timeouts": process.communicates},
+        "physical_receiving_before_exit": physical, "physical_receiving_after_exit": completed,
+        "native_execution": False,
+        "external_receiving_qualified": False, "go_controller_qualified": False,
+        "scope": "Actual guard and stdlib run; process identity, waits, kill and timeout are deterministic model events."}
+    # Release only our in-process fixture handles after recording their state.
+    for side in ("stdout", "stderr"):
+        process.kwargs[side].close()
+    (out / "probe.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps(result, indent=2))
+    return 0 if result["status"] == "PASS" else 1
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--guard", required=True, type=Path)
+    parser.add_argument("--out", required=True, type=Path)
+    args = parser.parse_args()
+    args.out.mkdir(parents=True, exist_ok=False)
+    raise SystemExit(probe(args.guard, args.out))

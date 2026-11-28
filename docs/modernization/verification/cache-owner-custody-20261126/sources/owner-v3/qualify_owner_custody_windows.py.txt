@@ -1,0 +1,139 @@
+"""Disabled fresh-scope Windows qualification; real native owner, exact candidate broker.
+
+Only synthetic test children and one read-only installed-Go metadata probe run.
+No product, Serena, Source, cache, old held run, GitHub Action or remote model is used.
+"""
+import sys
+sys.dont_write_bytecode = True
+import argparse, hashlib, importlib.util, json, os, subprocess, time
+from pathlib import Path
+
+REVIEW_COMPLETE = True
+ROOT = Path(__file__).resolve().parent
+ALLOWED_PARENT = Path(r"<TASK_WORKSPACE>")
+OUT = ROOT / "native-owner-qualification"
+GO = Path(r"<TOOLCHAIN_ROOT>\ucrt64\lib\go\bin\go.exe")
+GO_SHA256 = "0176dbac02ff27ef54c6bc5b316c7c2a2a89f7c8cf5fd314a0e03d6d2b924113"
+PYTHON_SHA256 = "d4e19e9a33268fb0ce575a24ab2d4b85972524f1933df008a6befc14dce19fbd"
+JOB_MODULE = Path(r"<INSTALLED_OWNER_ROOT>\releases\dad4875f\app\scripts\process_supervision\windows_job.py")
+JOB_SHA256 = "e3986f6fae259dccc07653bd1c48e1a1796019550a978f67dbc953dc9583b788"
+INPUTS = {
+    "guard-custody.py": "56d6ccee190472cbdacd5f0ec5f7636df3487f27ec208e0776c20c12a22b72f2",
+    "literal_go_exec_adapter_ready_v1.py": "e9ad8ea12d6e87833c8d5f347602a352e0a1733e8bf8ba83a9d6a3b36828403f",
+    "run_literal_go_gate_ready_v1.py": "1af0f9e564f876d1d1ae879ad1b11dc7875287be181413376e2f32bdd155f551",
+    "qualified_windows_products_consumer_v1.py": "87fafb9ed3b2f17f36b2829b41cc3a38a102198132dde04768131fc91491d6e1",
+    "qualify_owner_custody_local.py": "199c9183bb080565155f60003eed9f6ad4ee0a32c32c38c74ed8ed7746a87691",
+}
+
+def sha(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+def new_json(path, value):
+    with Path(path).open("x", encoding="utf-8", newline="\n") as output:
+        json.dump(value, output, indent=2)
+        output.write("\n")
+
+def require(condition, message):
+    if not condition:
+        raise RuntimeError(message)
+
+def verify_inputs(expected_runner_sha256):
+    require(REVIEW_COMPLETE is True, "disabled: root review, fresh tool pin and new scope required")
+    require(os.name == "nt" and ROOT.is_relative_to(ALLOWED_PARENT), "fresh D task scope required")
+    require(Path.cwd() == ROOT and sys.flags.isolated and sys.flags.no_site and sys.flags.dont_write_bytecode,
+            "exact isolated interpreter flags and runner directory required")
+    require(sha(__file__) == expected_runner_sha256, "reviewed qualification runner differs")
+    require(sha(sys.executable) == PYTHON_SHA256, "installed Python differs")
+    require(len(GO_SHA256) == 64 and sha(GO) == GO_SHA256, "read-only installed Go pin required")
+    require(sha(JOB_MODULE) == JOB_SHA256, "installed original Windows owner differs")
+    for name, expected in INPUTS.items():
+        require(len(expected) == 64 and sha(ROOT / name) == expected, "candidate input differs: " + name)
+
+def child():
+    spec = importlib.util.spec_from_file_location("native_owner_custody_fixtures", ROOT / "qualify_owner_custody_local.py")
+    fixtures = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = fixtures
+    spec.loader.exec_module(fixtures)
+    fixtures.OUT = OUT / "cases"
+    fixtures.NATIVE = True
+    fixtures.GO_PATH = GO
+    # The native fixture leaves load_original_owner/hidden_console unchanged.
+    # It executes actual candidate guard and broker methods, and extracts only
+    # the pinned RootInvocation/retention methods to avoid importing full-run data.
+    try:
+        return fixtures.main()
+    finally:
+        fixtures.retain_unsettled_fixtures()
+
+def parent(expected_runner_sha256):
+    OUT.mkdir()  # Never reuse a qualification directory or old run.
+    temp = OUT / "tmp"
+    temp.mkdir()
+    env = dict(os.environ)
+    env.update(TEMP=str(temp), TMP=str(temp), TMPDIR=str(temp), PYTHONDONTWRITEBYTECODE="1")
+    startup = subprocess.STARTUPINFO()
+    startup.dwFlags = subprocess.STARTF_USESHOWWINDOW
+    startup.wShowWindow = subprocess.SW_HIDE
+    started = time.monotonic()
+    diagnostic = None
+    with (OUT / "controller.stdout").open("xb") as out, (OUT / "controller.stderr").open("xb") as err:
+        proc = subprocess.Popen([sys.executable, "-I", "-S", "-B", str(Path(__file__).resolve()),
+            "--expected-runner-sha256", expected_runner_sha256, "--child"], cwd=ROOT, env=env,
+            stdin=subprocess.DEVNULL, stdout=out, stderr=err,
+            startupinfo=startup, creationflags=subprocess.CREATE_NEW_CONSOLE)
+        try:
+            new_json(OUT / "launch.json", {"schema":"owner-custody-native-launch-v1", "original_pid":proc.pid,
+                "watchdog_seconds":60, "hidden_console_requested":True,
+                "runner_sha256":expected_runner_sha256, "inputs":INPUTS,
+                "python_sha256":PYTHON_SHA256,"go_sha256":GO_SHA256,"native_owner_sha256":JOB_SHA256})
+            try:
+                proc.wait(timeout=60)
+            except BaseException as error:
+                diagnostic = type(error).__name__ + ": " + str(error)
+                new_json(OUT / "watchdog.json", {"status":"FAIL", "error":diagnostic,
+                    "original_controller_retained":True,"qualification_deadline_extended":False})
+        finally:
+            # A watchdog, publication failure or interruption never discards the
+            # original controller while it holds native objects or stream workers.
+            while True:
+                try:
+                    if proc.wait(timeout=1) is not None:
+                        break
+                except subprocess.TimeoutExpired:
+                    continue
+                except BaseException as error:
+                    diagnostic = diagnostic or type(error).__name__ + ": " + str(error)
+        code = proc.returncode
+    elapsed = time.monotonic() - started
+    path = OUT / "cases" / "receipt.json"
+    value = json.loads(path.read_text(encoding="utf-8"))
+    expected_cases = {"native-ordinary-stdin","native-go-metadata","metadata-normal","metadata-first-join",
+        "metadata-overflow","safe-pass-replay","safe-fail-replay","client-death","client-timeout",
+        "request-negatives","start-failure","finalization-failure","failed-receipt-save","invocation-deadline"}
+    passed = (code == 0 and diagnostic is None and elapsed <= 60 and value.get("status") == "PASS"
+        and value.get("native_windows_owner") is True and value.get("old_held_scope_accessed") is False
+        and value.get("all_original_fixture_threads_joined") is True
+        and value.get("all_original_local_children_reaped") is True
+        and {row["case"] for row in value.get("cases",[])} == expected_cases
+        and all(row.get("status") == "PASS" for row in value.get("cases",[])))
+    receipt = {"schema":"root-owner-custody-native-qualification-v1", "status":"PASS" if passed else "FAIL",
+        "controller_exit_code":code,"original_controller_reaped":True,
+        "controller_capture_handles_closed":out.closed and err.closed,
+        "seconds":elapsed,"diagnostic":diagnostic,"receipt_sha256":sha(path),"inputs":INPUTS,
+        "scope":"actual new guard/RootInvocation/broker; synthetic tool output; installed Go metadata read-only",
+        "consumer_timeout_probe":"deterministic consumer-only monotonic expiry injection; not measured real355s latency",
+        "full_regression_executed":False,"serena_qualification_repeated":False,"old_unknown_reclassified":False}
+    new_json(OUT / "root-receiving.json", receipt)
+    print(json.dumps(receipt, indent=2), flush=True)
+    return 0 if passed else 1
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--expected-runner-sha256", required=True)
+    parser.add_argument("--child", action="store_true")
+    args = parser.parse_args()
+    verify_inputs(args.expected_runner_sha256)
+    return child() if args.child else parent(args.expected_runner_sha256)
+
+if __name__ == "__main__":
+    raise SystemExit(main())

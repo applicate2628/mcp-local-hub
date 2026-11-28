@@ -1,0 +1,206 @@
+diff --git a/internal/api/main_helper_dispatch_test.go b/internal/api/main_helper_dispatch_test.go
+index 16a795c01c81471e90bf356573da48d3f8984820..af06c4dda8b922120b2ac52e26589a3264e826de 100644
+--- a/internal/api/main_helper_dispatch_test.go
++++ b/internal/api/main_helper_dispatch_test.go
+@@ -30,6 +30,11 @@ func classifyAPITestHelperDispatch(args []string, getenv func(string) string) ap
+ 	adoptEntry := getenv("MCPHUB_A2_ENTRY")
+ 	stdioMode := getenv(stdioBridgeAdmissionHelperEnv)
+ 	port, portErr := strconv.Atoi(getenv(stdioBridgeAdmissionHelperPortEnv))
++	portProbeDir := getenv(portProbeFixtureDirEnv)
++	portProbeImage := ""
++	if len(args) > 0 {
++		portProbeImage = strings.TrimSuffix(filepath.Base(args[0]), ".exe")
++	}
+ 
+ 	validAdoptRole := false
+ 	switch adoptRole {
+@@ -44,6 +49,12 @@ func classifyAPITestHelperDispatch(args []string, getenv func(string) string) ap
+ 		dispatch apiTestHelperDispatch
+ 	}
+ 	candidates := []candidate{
++		{
++			active: portProbeDir != "",
++			valid:  validAPITestHelperPath(portProbeDir) && (portProbeImage == "netstat" || portProbeImage == "wmic"),
++			// The existing fixture body runs after this pure role gate. It
++			// records unexpected tool argv before rejecting those arguments.
++		},
+ 		{
+ 			active: oracleRole != "" || oracleDelay != "",
+ 			valid: selector == "^TestIntentAudit_CallerStartTimeAgainstIndependentOracle$" &&
+diff --git a/internal/api/main_helper_dispatch_validation_test.go b/internal/api/main_helper_dispatch_validation_test.go
+index d5713ff828b147aae5eceef2df3ebcfbc7c3b9e1..b22dd02eacf1c29cc5ec41b1422be6a9a75d5631 100644
+--- a/internal/api/main_helper_dispatch_validation_test.go
++++ b/internal/api/main_helper_dispatch_validation_test.go
+@@ -92,6 +92,13 @@ func TestClassifyAPITestHelperDispatchRejectsUnsafeInputs(t *testing.T) {
+ 	}
+ 	for i, fixture := range fixtures {
+ 		t.Run(fixture.name, func(t *testing.T) {
++			withPortProbe := make(map[string]string)
++			for key, value := range fixture.env {
++				withPortProbe[key] = value
++			}
++			withPortProbe[portProbeFixtureDirEnv] = root
++			reject(t, []string{"api.test", "-test.run=" + fixture.selector}, withPortProbe)
++
+ 			for _, args := range [][]string{
+ 				{"api.test"},
+ 				{"api.test", "-test.run=.*"},
+diff --git a/internal/api/main_test.go b/internal/api/main_test.go
+index 76236efec30425dfc8425c4566caa2c53ecc0be6..e657893ce894a6ce27e1d7d6d0f1a4bc3f1d134f 100644
+--- a/internal/api/main_test.go
++++ b/internal/api/main_test.go
+@@ -64,8 +64,6 @@ import (
+ // os.Exit-safety: defers do NOT run after os.Exit, so cleanup is performed
+ // explicitly after capturing m.Run()'s exit code.
+ func TestMain(m *testing.M) {
+-	runPortProbeTestChild()
+-
+ 	// Preserve the oracle's closed role envelope and private stdout result;
+ 	// the shared dispatcher rejects mixed helper roles before any child runs.
+ 	child, err := classifyCallerStartTimeOracle(os.Args[1:], os.Environ())
+@@ -78,6 +76,9 @@ func TestMain(m *testing.M) {
+ 		_, _ = os.Stderr.WriteString("internal/api TestMain: invalid helper invocation\n")
+ 		os.Exit(3)
+ 	}
++	// The copied netstat/wmic fixture must pass the same mixed-role gate before
++	// it records any call. Its body still witnesses unexpected tool arguments.
++	runPortProbeTestChild()
+ 	if child {
+ 		if err := runCallerStartTimeOracleChild(os.Stdout); err != nil {
+ 			_, _ = fmt.Fprintln(os.Stderr, err)
+diff --git a/internal/api/port_pid_probe_test.go b/internal/api/port_pid_probe_test.go
+index 93d9cbc5ac282f414065b2eeffbef719f21c6a86..1c0e0aa29c908109940bb7bb5c8c845a1feca999 100644
+--- a/internal/api/port_pid_probe_test.go
++++ b/internal/api/port_pid_probe_test.go
+@@ -1,6 +1,8 @@
+ package api
+ 
+ import (
++	"bytes"
++	"context"
+ 	"encoding/json"
+ 	"errors"
+ 	"fmt"
+@@ -13,6 +15,8 @@ import (
+ 	"strings"
+ 	"testing"
+ 	"time"
++
++	"mcp-local-hub/internal/process"
+ )
+ 
+ const portProbeFixtureDirEnv = "MCPHUB_TEST_PORT_PROBE_DIR"
+@@ -22,9 +26,10 @@ type portProbeFixtureReply struct {
+ 	Exit   int
+ }
+ 
+-// runPortProbeTestChild is called before TestMain's normal suite setup. Only
+-// copies explicitly named netstat/wmic, with a parent-issued fixture directory,
+-// enter this branch. No host process table, listener, identity or kill is used.
++// runPortProbeTestChild is called after pure helper-role admission and before
++// TestMain's normal suite setup. Only copies explicitly named netstat/wmic,
++// with a parent-issued fixture directory, enter this branch. No host process
++// table, listener, identity or kill is used.
+ func runPortProbeTestChild() {
+ 	dir := os.Getenv(portProbeFixtureDirEnv)
+ 	command := strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe")
+@@ -119,6 +124,99 @@ func usePortProbeFixture(t *testing.T, bin string, replies map[string]portProbeF
+ 	}
+ }
+ 
++func TestPortProbeTestHelperAdmission(t *testing.T) {
++	bin := portProbeFixtureBinaries(t)
++	exe, err := os.Executable()
++	if err != nil {
++		t.Fatal(err)
++	}
++	const output = "port-probe fixture\n"
++	for _, tc := range []struct {
++		name, image, role string
++		args              []string
++		wantExit          int
++		wantOutput        string
++		wantCalls         []string
++	}{
++		{name: "ordinary netstat", image: "netstat", args: []string{"-ano"}, wantOutput: output, wantCalls: []string{"netstat"}},
++		{name: "unexpected wmic argv retains witness", image: "wmic", args: []string{"unexpected-query"}, wantExit: 93, wantCalls: []string{"wmic"}},
++		{name: "port plus oracle", image: "netstat", role: "oracle", args: []string{"-ano"}, wantExit: 3},
++		{name: "port plus vault", image: "netstat", role: "vault", args: []string{"-ano"}, wantExit: 3},
++		{name: "oracle plus port", role: "oracle", args: []string{callerStartTimeOracleSelector}, wantExit: 3},
++		{name: "vault plus port", role: "vault", args: []string{"-test.run=^TestVaultFlockHelperProcess$"}, wantExit: 3},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			calls := usePortProbeFixture(t, bin, map[string]portProbeFixtureReply{
++				"netstat": {Output: output},
++				"wmic":    {Output: output},
++			})
++			dir := os.Getenv(portProbeFixtureDirEnv)
++			childImage := exe
++			if tc.image != "" {
++				name := tc.image
++				if runtime.GOOS == "windows" {
++					name += ".exe"
++				}
++				childImage = filepath.Join(bin, name)
++			}
++			env := os.Environ()
++			switch tc.role {
++			case "oracle":
++				env = append(env, callerStartTimeChildStateDirEnv+"="+callerStartTimeChildRole,
++					callerStartTimeChildDelayEnv+"="+callerStartTimeOracleDelayValue())
++			case "vault":
++				// Keep the negative-control child finite even if role admission
++				// regresses: it sees only these private, pre-released fixture paths.
++				release := filepath.Join(dir, "release")
++				if err := os.WriteFile(release, []byte("release"), 0600); err != nil {
++					t.Fatal(err)
++				}
++				env = append(env, "MCPHUB_TEST_HOLD_VAULT_LOCK=1",
++					"MCPHUB_TEST_VAULT_PATH="+filepath.Join(dir, "vault"),
++					"MCPHUB_TEST_READY_PATH="+filepath.Join(dir, "ready"),
++					"MCPHUB_TEST_RELEASE_PATH="+release)
++			}
++			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
++			defer cancel()
++			cmd := exec.CommandContext(ctx, childImage, tc.args...)
++			process.NoConsole(cmd)
++			cmd.WaitDelay = time.Second
++			cmd.Env = env
++			var stdout, stderr bytes.Buffer
++			cmd.Stdout, cmd.Stderr = &stdout, &stderr
++			// Run is the sole wait owner and settles this original fixture
++			// child before t.TempDir cleanup. No installed tool is executed.
++			runErr := cmd.Run()
++			if ctx.Err() != nil {
++				t.Fatalf("fixture child exceeded its deadline: %v", ctx.Err())
++			}
++			exitCode := 0
++			if runErr != nil {
++				var exitErr *exec.ExitError
++				if !errors.As(runErr, &exitErr) {
++					t.Fatalf("fixture child did not settle with an exit: %v", runErr)
++				}
++				exitCode = exitErr.ExitCode()
++			}
++			gotCalls := calls()
++			if exitCode != tc.wantExit || stdout.String() != tc.wantOutput || !reflect.DeepEqual(gotCalls, tc.wantCalls) {
++				t.Fatalf("exit=%d stdout=%q calls=%v stderr=%q, want exit=%d stdout=%q calls=%v",
++					exitCode, stdout.String(), gotCalls, stderr.String(), tc.wantExit, tc.wantOutput, tc.wantCalls)
++			}
++			if tc.role != "" {
++				if !strings.Contains(stderr.String(), "invalid") {
++					t.Fatalf("mixed role did not fail at TestMain admission: %q", stderr.String())
++				}
++				for _, leaf := range []string{"calls.txt", "ready", "vault.lock"} {
++					if _, err := os.Lstat(filepath.Join(dir, leaf)); !errors.Is(err, os.ErrNotExist) {
++						t.Fatalf("mixed role reached fixture I/O for %s: %v", leaf, err)
++					}
++				}
++			}
++		})
++	}
++}
++
+ func TestQueryLoopbackPortPIDUsesBoundedCollectorWithoutMetrics(t *testing.T) {
+ 	bin := portProbeFixtureBinaries(t)
+ 	const output = "TCP 0.0.0.0:33840 0.0.0.0:0 LISTENING 999\n" +

@@ -1,0 +1,110 @@
+{
+  "schema": "original-v6-existing-public-inputs-v1",
+  "comparison": "Exact Git blob object identity of the local immutable bytes was matched to complete public GitHub tree listings.",
+  "public_tree_snapshots": [
+    {
+      "pr": 631,
+      "commit": "c80fd6b4e6f9806eb7d94726a979e9e89d46ec75",
+      "truncated": false,
+      "url": "https://github.com/applicate2628/mcp-local-hub/tree/c80fd6b4e6f9806eb7d94726a979e9e89d46ec75"
+    },
+    {
+      "pr": 637,
+      "commit": "123858ef8292aceb86d8ca7ef71d4e4dea1fec91",
+      "truncated": false,
+      "url": "https://github.com/applicate2628/mcp-local-hub/tree/123858ef8292aceb86d8ca7ef71d4e4dea1fec91"
+    },
+    {
+      "pr": 664,
+      "commit": "da5e86fd9e8a12731553f6646867808034d705bb",
+      "truncated": false,
+      "url": "https://github.com/applicate2628/mcp-local-hub/tree/da5e86fd9e8a12731553f6646867808034d705bb"
+    },
+    {
+      "pr": 665,
+      "commit": "bec9a4b61aed39b99073cb22fce6ffbcf1be8a95",
+      "truncated": false,
+      "url": "https://github.com/applicate2628/mcp-local-hub/tree/bec9a4b61aed39b99073cb22fce6ffbcf1be8a95"
+    },
+    {
+      "pr": 666,
+      "commit": "5ad374eb60cadb8ad56ea167e3fb06edb44bdc18",
+      "truncated": false,
+      "url": "https://github.com/applicate2628/mcp-local-hub/tree/5ad374eb60cadb8ad56ea167e3fb06edb44bdc18"
+    }
+  ],
+  "exact_public_file_count": 5,
+  "files": [
+    {
+      "original_role_path": "inputs-original-v6/canonical_receiving_v4.py",
+      "bytes": 48228,
+      "sha256": "6ad13e7c57e604111552fd553f10a66a174c9ba9b96dc37484dfba071a9bf2a0",
+      "git_blob": "193486e52b0c504484ec7dcf1663a8ca4513b2f6",
+      "exact_public_matches": [
+        {
+          "pr": 664,
+          "commit": "da5e86fd9e8a12731553f6646867808034d705bb",
+          "path": "docs/modernization/verification/failed-owner-receiving-20261126/sources/candidate/canonical_receiving_v4.py.txt",
+          "url": "https://github.com/applicate2628/mcp-local-hub/blob/da5e86fd9e8a12731553f6646867808034d705bb/docs/modernization/verification/failed-owner-receiving-20261126/sources/candidate/canonical_receiving_v4.py.txt"
+        }
+      ]
+    },
+    {
+      "original_role_path": "inputs-original-v6/external-source-original/controller/inputs_windows.go",
+      "bytes": 11040,
+      "sha256": "345197b965bd59a97c43e846ab35a37393852cbac7dfe5cabc0f0a109576e6cc",
+      "git_blob": "d866829e79d7ac35608396bd2d29efbcc30f9d00",
+      "exact_public_matches": [
+        {
+          "pr": 664,
+          "commit": "da5e86fd9e8a12731553f6646867808034d705bb",
+          "path": "docs/modernization/verification/failed-owner-receiving-20261126/sources/candidate/controller/inputs_windows.go.txt",
+          "url": "https://github.com/applicate2628/mcp-local-hub/blob/da5e86fd9e8a12731553f6646867808034d705bb/docs/modernization/verification/failed-owner-receiving-20261126/sources/candidate/controller/inputs_windows.go.txt"
+        }
+      ]
+    },
+    {
+      "original_role_path": "inputs-original-v6/external-source-original/owner/canonicalcaseowner/capture_windows_amd64.go",
+      "bytes": 3395,
+      "sha256": "e734df342f5b863ffe9916fa71d9c7712b5c305346662419bccc7716517e0053",
+      "git_blob": "e8679a7a65d1775a17d878d67255a4c937725737",
+      "exact_public_matches": [
+        {
+          "pr": 664,
+          "commit": "da5e86fd9e8a12731553f6646867808034d705bb",
+          "path": "docs/modernization/verification/failed-owner-receiving-20261126/sources/candidate/owner/canonicalcaseowner/capture_windows_amd64.go.txt",
+          "url": "https://github.com/applicate2628/mcp-local-hub/blob/da5e86fd9e8a12731553f6646867808034d705bb/docs/modernization/verification/failed-owner-receiving-20261126/sources/candidate/owner/canonicalcaseowner/capture_windows_amd64.go.txt"
+        }
+      ]
+    },
+    {
+      "original_role_path": "inputs-original-v6/external-source-original/owner/canonicalcaseowner/native_windows_amd64.go",
+      "bytes": 11982,
+      "sha256": "8729ac9c525e664c5d7f279b277a93b9e06841e6757a14de508719d026335f87",
+      "git_blob": "4822691c1d99c19f41743d45afbc2992f8134499",
+      "exact_public_matches": [
+        {
+          "pr": 664,
+          "commit": "da5e86fd9e8a12731553f6646867808034d705bb",
+          "path": "docs/modernization/verification/failed-owner-receiving-20261126/sources/candidate/owner/canonicalcaseowner/native_windows_amd64.go.txt",
+          "url": "https://github.com/applicate2628/mcp-local-hub/blob/da5e86fd9e8a12731553f6646867808034d705bb/docs/modernization/verification/failed-owner-receiving-20261126/sources/candidate/owner/canonicalcaseowner/native_windows_amd64.go.txt"
+        }
+      ]
+    },
+    {
+      "original_role_path": "inputs-original-v6/external-source-original/owner/canonicalcaseowner/owner_windows_amd64.go",
+      "bytes": 29509,
+      "sha256": "7276febe485aea1791fc6757ad1c710a108e3c60e7aa263e656ad985dfe22294",
+      "git_blob": "5bc9dd93fc8903d7dfb4acc33dda634b54e72023",
+      "exact_public_matches": [
+        {
+          "pr": 664,
+          "commit": "da5e86fd9e8a12731553f6646867808034d705bb",
+          "path": "docs/modernization/verification/failed-owner-receiving-20261126/sources/candidate/owner/canonicalcaseowner/owner_windows_amd64.go.txt",
+          "url": "https://github.com/applicate2628/mcp-local-hub/blob/da5e86fd9e8a12731553f6646867808034d705bb/docs/modernization/verification/failed-owner-receiving-20261126/sources/candidate/owner/canonicalcaseowner/owner_windows_amd64.go.txt"
+        }
+      ]
+    }
+  ],
+  "absence_scope": "The remaining 22 exact versions were not present as blobs in these five public PR head trees. This does not claim an exhaustive search of all historical commits or other repositories."
+}

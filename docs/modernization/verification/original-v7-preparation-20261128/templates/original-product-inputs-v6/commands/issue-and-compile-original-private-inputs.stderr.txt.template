@@ -1,0 +1,6 @@
+[31;1mException: [0m@@RECOVERY_APPROVED_WORK_AREA_RAW@@\mcp-acceptance-rebuild-20261127-v1\inputs-original-v6\build_private_inputs_v6.ps1:65
+[36;1mLine |[0m
+[36;1m[36;1m  65 | [0m     [36;1mthrow 'Concrete reviewed release version/date required'[0m
+[36;1m     | [31;1m     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+[36;1m[31;1m[31;1m[36;1m     | [31;1mConcrete reviewed release version/date required[0m
+[36;1m[31;1m[31;1m[36;1m[31;1m[0m

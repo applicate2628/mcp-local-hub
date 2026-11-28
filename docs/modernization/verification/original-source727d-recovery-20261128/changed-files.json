@@ -1,0 +1,481 @@
+{
+  "schema": "original-source727d-delta-files-v1",
+  "stages": [
+    {
+      "patch": "3ebe-to-0145.patch",
+      "before_commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+      "after_commit": "0145a2547a3025cc518cf3e2fa89d2e22cb73c08",
+      "after_tree": "3e394f52ea67468edb20b3590586334acffb716c",
+      "paths": [
+        {
+          "path": "internal/api/adopt_codex_transport_test.go",
+          "before": {
+            "mode": "100644",
+            "blob": "ef55fd131bf051c5dad6b20723c81b563aa0ccf4",
+            "bytes": 9342,
+            "sha256": "203130a9449ad7c97191b514720975f5647f9fb416d3bfab340093323e8d48dd"
+          },
+          "after": {
+            "mode": "100644",
+            "blob": "332b49f17cc30d558a0d3c59b602b3625dcd09bc",
+            "bytes": 9532,
+            "sha256": "e15d9ebf574459f5d13db01d58301df9cdebffa31870bc558b97b87af560d602"
+          }
+        },
+        {
+          "path": "internal/api/adopt_deadopt_lifecycle_test.go",
+          "before": {
+            "mode": "100644",
+            "blob": "37f34d636c1d0883dd988a1c5b84aca964dce7c5",
+            "bytes": 4616,
+            "sha256": "15bf34d4efecb5f61ba597c0d3bc255b6d5ced6ca0ef4f843d567d16cf13d6c9"
+          },
+          "after": {
+            "mode": "100644",
+            "blob": "36279734c2f6be64dc81e60c2f8d0d01ed8ce68f",
+            "bytes": 4668,
+            "sha256": "f82d97abeffe51c45c2f3978937c8d679c8bef90612897a7fa25020bf05a4346"
+          }
+        },
+        {
+          "path": "internal/api/adopt_h4_summary_signal_test.go",
+          "before": {
+            "mode": "100644",
+            "blob": "ab36c0df5efa705b28cb3a52dc707c1ec8f789eb",
+            "bytes": 13362,
+            "sha256": "976dea698f201702480ebf8e6dd24e4e926e40900d7535332eddaacb290524d6"
+          },
+          "after": {
+            "mode": "100644",
+            "blob": "229619d7b027df355e38e0805a3be4c7f0d9c930",
+            "bytes": 13667,
+            "sha256": "bcbb8bd9352245f1e82ee5e97796109fee492ac70f75c42a32979a1fedb146a4"
+          }
+        },
+        {
+          "path": "internal/api/adopt_lease_namespace_windows_test.go",
+          "before": {
+            "mode": "100644",
+            "blob": "4dc6ac2671bceecf12cfbb6a24055c045787074d",
+            "bytes": 47347,
+            "sha256": "6f324e7a05c089016507fa7f0613917c24a4348658d7add7afcf99f1f224e49a"
+          },
+          "after": {
+            "mode": "100644",
+            "blob": "19da9dff6e6464bab2e9b607afd7dfb5a86afaad",
+            "bytes": 47872,
+            "sha256": "960efbfeef9f445787567cff93e67a53967cc867be23098f8c353aafe15509be"
+          }
+        },
+        {
+          "path": "internal/api/adopt_lease_owner_test.go",
+          "before": {
+            "mode": "100644",
+            "blob": "8f19522959dc3cb497046cdaef46d70937918537",
+            "bytes": 20935,
+            "sha256": "07ed1d764cdc38d0656526885e9a2324e2409df2c6ac6d33cb0849cd6680ec37"
+          },
+          "after": {
+            "mode": "100644",
+            "blob": "a0f540b4d982eeef4696fa90318de3ecbc993d6d",
+            "bytes": 20987,
+            "sha256": "5644d51a482785bf0078df9f2bd6abcf4c7c640b7c4821543af94ad9549321a7"
+          }
+        },
+        {
+          "path": "internal/api/adopt_mcpcompat_test.go",
+          "before": {
+            "mode": "100644",
+            "blob": "a43df81f21c3107d149317cb5226f096b83208cc",
+            "bytes": 4297,
+            "sha256": "1c9400a300b08af5c04f59e1738b357df1965da2ad54f7688f30bb293521b490"
+          },
+          "after": {
+            "mode": "100644",
+            "blob": "6f336ba8b7b5d9fbb87e43387d3aff464c3b1c48",
+            "bytes": 4401,
+            "sha256": "469c703c4678646076aed8d346ce4c70d0ff49cf5063752dab3dfc8a984cbbd9"
+          }
+        },
+        {
+          "path": "internal/api/adopt_project_plan_test.go",
+          "before": {
+            "mode": "100644",
+            "blob": "b4eefa18a4490275829eef8217148f9b701047ec",
+            "bytes": 14441,
+            "sha256": "4eccaebc6bfb3be956abce0b1b3f011baa23454fb09b43f7116ae2fefb557c40"
+          },
+          "after": {
+            "mode": "100644",
+            "blob": "74b312a793fa54c51c94f52ca768d4b5d02dd5d3",
+            "bytes": 14649,
+            "sha256": "83938bc05419d530c579686b901f33d5324fa795d114fe50e54c71d79669cbb7"
+          }
+        },
+        {
+          "path": "internal/api/adopt_provider_working_directory_windows_test.go",
+          "before": {
+            "mode": "100644",
+            "blob": "4ff265d838646e1338eacce5c67106fe8c1b204a",
+            "bytes": 43864,
+            "sha256": "5eb2fa9d2605388feb5735566a52fd4e820398e767c2c5bf2ba0963126c7a357"
+          },
+          "after": {
+            "mode": "100644",
+            "blob": "e86bfecabc0a05a37099cd30dc1108805cc43988",
+            "bytes": 44798,
+            "sha256": "1427099b98f5d851cb8bb2462bfa166ea7687d8ab34cc14142e9344fb39bb4f9"
+          }
+        },
+        {
+          "path": "internal/api/adopt_test.go",
+          "before": {
+            "mode": "100644",
+            "blob": "19a853e732cb1d30bc54692e05d72a1b56438161",
+            "bytes": 81862,
+            "sha256": "e8023af03d1834255c08de894d83c2acd946dc29422fcb64b23afbc70306511c"
+          },
+          "after": {
+            "mode": "100644",
+            "blob": "08b88a3e12d4e1a60238e0f76325d5dc7e967246",
+            "bytes": 82373,
+            "sha256": "35a732e5c96b2f881f8bfc149008f2ebc6873fe7971ea637cb313fbbb1111aa8"
+          }
+        },
+        {
+          "path": "internal/api/attach_client_plan_windows_test.go",
+          "before": {
+            "mode": "100644",
+            "blob": "871b90e935ca5306848cbd498c91d909c5522cd1",
+            "bytes": 72052,
+            "sha256": "b03c3277a9acc13f65641515462fcca782c1f1cd22471811de7ebdefcf5db63f"
+          },
+          "after": {
+            "mode": "100644",
+            "blob": "82960d9c03f0bdc54bd820cc54b84ad82528a385",
+            "bytes": 72059,
+            "sha256": "89d513bc736f8fa154ffe6555d336b2de18e1a29fa0e0791d9b0a8420321e83b"
+          }
+        },
+        {
+          "path": "internal/api/main_helper_dispatch_test.go",
+          "before": {
+            "mode": "100644",
+            "blob": "05c3c8d831013ebd4114dcb372d55137132ce606",
+            "bytes": 4137,
+            "sha256": "3f9e37d635d2942fd0f967a11d107fe7657c35fab976d524176d15006299fd95"
+          },
+          "after": {
+            "mode": "100644",
+            "blob": "289a3e0d632e83b43d78154ea833c79c828ffeee",
+            "bytes": 4415,
+            "sha256": "7af5525379385d8a40f8ce0cf63879727784ad57f9568e4f90e806977ab62161"
+          }
+        },
+        {
+          "path": "internal/api/main_helper_dispatch_validation_test.go",
+          "before": {
+            "mode": "100644",
+            "blob": "86b8a81a3bd8cb0219bd99f8a4aba5899f792bb0",
+            "bytes": 6651,
+            "sha256": "bcc4636ea0a3c260015e155ed1d8ad2dc287dea93dc2d29b33c3d45bc56d09fd"
+          },
+          "after": {
+            "mode": "100644",
+            "blob": "4bb29e54e6f8526d5d40f1b484227ad71c4e8e75",
+            "bytes": 7310,
+            "sha256": "8754a28c0d8d17f355c0575d4c4f1952b32aa51112cc8a473b1ad99de0ed4b63"
+          }
+        },
+        {
+          "path": "internal/api/main_test.go",
+          "before": {
+            "mode": "100644",
+            "blob": "665f48f9d658fed3708700a30c3d60df3a979bcd",
+            "bytes": 16576,
+            "sha256": "2c93ff894595a54b13f4409492a807aae3dba3dda5145af22b191b2bbd8b4cd1"
+          },
+          "after": {
+            "mode": "100644",
+            "blob": "88b0c35c6848e775c08fcefaa32207486bf4af8f",
+            "bytes": 16805,
+            "sha256": "338e9c528d8d00bf5824b2d192f7637fd761e2674d7243160c7994dfbd8e9415"
+          }
+        },
+        {
+          "path": "internal/api/required_secret_gate_test.go",
+          "before": {
+            "mode": "100644",
+            "blob": "5c3e99cfabdc09983f7136979be3f739af761800",
+            "bytes": 18782,
+            "sha256": "d90b41770ba06e5cc4d729a2dde1b699f7412763cb293884189e1d7cabf2f218"
+          },
+          "after": {
+            "mode": "100644",
+            "blob": "12e16793df6f749ade0ea548703c3b0d2dd32cac",
+            "bytes": 18672,
+            "sha256": "46d86ac763146e58d8bd9426f534116fa4f38fe28f440d4b14953b352beedbf8"
+          }
+        },
+        {
+          "path": "internal/api/supervisor_stderr_sink_test.go",
+          "before": {
+            "mode": "100644",
+            "blob": "39142cc73a25f9fdc92d6ebaf89b43967851e9b4",
+            "bytes": 5431,
+            "sha256": "43943d1f99ccd8b46ca6b48dedd7e885629096a140c6d617c4e0145c863f22fd"
+          },
+          "after": {
+            "mode": "100644",
+            "blob": "da2038a30beec9a4ea7710f55063c0f600762d6b",
+            "bytes": 5357,
+            "sha256": "15b75f734569684b60d9c069d3cd32b19992e9d01573e4e8df282d19e449de4b"
+          }
+        },
+        {
+          "path": "internal/cli/adopt_mcpcompat_test.go",
+          "before": {
+            "mode": "100644",
+            "blob": "3a33178a57f99998ac9a86878a27b90636569d13",
+            "bytes": 2556,
+            "sha256": "904164739b1ac56bfe4036ae43ce6f1679791d9d7d9ba96c0199e906b3451253"
+          },
+          "after": {
+            "mode": "100644",
+            "blob": "403eefdea619e4df0b57d56d22b618293d20b699",
+            "bytes": 2538,
+            "sha256": "1bece58170bc93053f2f6dbd5af2e6a6c47ace05187e1aa6c01021552215d88b"
+          }
+        },
+        {
+          "path": "internal/cli/adopt_test.go",
+          "before": {
+            "mode": "100644",
+            "blob": "0cdd27c31a69d591e0a99ca1db162e4bbb822fb2",
+            "bytes": 16840,
+            "sha256": "9b8d81f913cb8f9e276b07b636465002706b161249c8ac61cf4a4e214856d218"
+          },
+          "after": {
+            "mode": "100644",
+            "blob": "78cdf77fbcbf3219838b4a3faaa8d1c5a6e2d15f",
+            "bytes": 16768,
+            "sha256": "7eebc94e94eb3868457659e9f964ecfbf563d612d3065f17c54ed28b4a186017"
+          }
+        },
+        {
+          "path": "internal/cli/gui_force_test.go",
+          "before": {
+            "mode": "100644",
+            "blob": "3434d159391629281faf8e6a42ae88fac498888d",
+            "bytes": 51400,
+            "sha256": "27e12e9cf46d97f373a53ee648d8f6fc5b8a91737aacf78e2489e04e89d1f03d"
+          },
+          "after": {
+            "mode": "100644",
+            "blob": "e2fe6d9d2ae3e46ac2b59133383f503f47764590",
+            "bytes": 51698,
+            "sha256": "993356994b411471ad7f5a7e0db6297cdc0908cb7f666974ad43561493e65e23"
+          }
+        },
+        {
+          "path": "internal/cli/private_serena_migration_case_windows_test.go",
+          "before": {
+            "mode": "100644",
+            "blob": "1ecb01b3cd4ca9987dee5aa2df6afb86f93f394b",
+            "bytes": 42477,
+            "sha256": "3e3adff7db439e314dc496528d3ddce81f7f1121a4ba0534309bcdb11ba786a1"
+          },
+          "after": {
+            "mode": "100644",
+            "blob": "f15ebef531f2d0038d7587de03d7355f1b4b4957",
+            "bytes": 43873,
+            "sha256": "626ebdcea4412be6d21af3d6f077ebac06e43c013d4b4e28d08bc8c58f90d20e"
+          }
+        },
+        {
+          "path": "internal/cli/supervise_lostchild_f1_f3_test.go",
+          "before": {
+            "mode": "100644",
+            "blob": "03315ea97df4c8d3dd44fdfe460fcf2124208619",
+            "bytes": 56461,
+            "sha256": "622eca1f712ea5d74aa10396df32afd116dedba9dea938854bfa266bf2cfd13c"
+          },
+          "after": {
+            "mode": "100644",
+            "blob": "7452c3e1f8336815f46922b93157a12c15dccdae",
+            "bytes": 57137,
+            "sha256": "e8ec674537bc2a34bfbd21fc0c16bea0c9f5df0001cd13a392d9cd67c1a752a9"
+          }
+        },
+        {
+          "path": "internal/cli/supervise_reconcile_ipc_test.go",
+          "before": {
+            "mode": "100644",
+            "blob": "5a6b2c5f5641b34844d9a2ffbce522a9a8e97b68",
+            "bytes": 82357,
+            "sha256": "c8a4d2309be256677092ae7f454546de197ad19dea9593d7d0d18d796f0e1bb4"
+          },
+          "after": {
+            "mode": "100644",
+            "blob": "899ee7e2d2b5f2cb6d9ed2e2cd1c37df853580da",
+            "bytes": 82819,
+            "sha256": "7b97cab7c6d68f642091d241845dea831c488acce0f785b69c242a2e29b3d71d"
+          }
+        },
+        {
+          "path": "internal/cli/supervise_respawn_arm_gen_test.go",
+          "before": {
+            "mode": "100644",
+            "blob": "62aafa1987c0593351228d4c34d299d9254d36d7",
+            "bytes": 8310,
+            "sha256": "32222a9c1b52945655f3fc521d9391833dc62b49ee5675294d16bc026ca85bce"
+          },
+          "after": {
+            "mode": "100644",
+            "blob": "708409f19958636b503d6bb5d6310ca5ca18557a",
+            "bytes": 8427,
+            "sha256": "e6e24032a8c11b8a5fcaa3cd5a64acaec239ddd8254c8195b748bcca737093a7"
+          }
+        },
+        {
+          "path": "internal/cli/supervise_test.go",
+          "before": {
+            "mode": "100644",
+            "blob": "d4d7f492379b7f543f074982260148ad8bfff207",
+            "bytes": 71938,
+            "sha256": "5b935de2b67cf35ce39066d00eb563f96a2f1fe1c0efa277be5c930eb4ea1e62"
+          },
+          "after": {
+            "mode": "100644",
+            "blob": "c1985ab57bf2a5347547187730aef80d847fa139",
+            "bytes": 70877,
+            "sha256": "294f4bc40f7e5060ab8209e016ec0cb5f70e2c1f02c0bf735fb3d7f00d67f612"
+          }
+        },
+        {
+          "path": "internal/cli/supervisor_controller_orphan_reap_test.go",
+          "before": {
+            "mode": "100644",
+            "blob": "14abb540847502c65473ed2a75446e34a73d16d3",
+            "bytes": 126966,
+            "sha256": "3a642f72e01763f5c7db435229c2724adf2611b940e276920a46ae59d2fc6b7e"
+          },
+          "after": {
+            "mode": "100644",
+            "blob": "57937cb9ea9c2c20afb498cfef0a75cbf414f2cf",
+            "bytes": 127134,
+            "sha256": "c5659a7da6192e4ac7d57d3d8734643befd7a9ecf16670f4c043540238be24f3"
+          }
+        },
+        {
+          "path": "internal/cli/upgrade_gui_fence_windows_test.go",
+          "before": {
+            "mode": "100644",
+            "blob": "5fbc9fb9104a22dcbd6d195c9423b6b011cdac36",
+            "bytes": 133184,
+            "sha256": "676a1637187424c6a015adb5e2956e0880883e9c147d70a40991e4c5b94bcdea"
+          },
+          "after": {
+            "mode": "100644",
+            "blob": "5cce7e8804e16806575ba950eca551a6ee5d9836",
+            "bytes": 133142,
+            "sha256": "8774a51838b3a3947e9547de78b906a57a67d9f91e716fc13d5acd87bbd88eea"
+          }
+        },
+        {
+          "path": "internal/cli/upgrade_gui_qualified_fixture_windows_test.go",
+          "before": {
+            "mode": "100644",
+            "blob": "bb92fdc0c936c94e7489a87d681b90fc5fdcf257",
+            "bytes": 18562,
+            "sha256": "c6a16db08ae156855f54c7e64107a18ffa7baa23e5bdb94295ff8917c3fcab66"
+          },
+          "after": {
+            "mode": "100644",
+            "blob": "dcdac5b9138b1d12a32100620030abd127c1fd72",
+            "bytes": 19735,
+            "sha256": "bbda7cd86af4f41fce3fac07aa23f1a2d0f7c16c85f9bb0af254141712ef8fa6"
+          }
+        },
+        {
+          "path": "internal/cli/workspace_cmd_test.go",
+          "before": {
+            "mode": "100644",
+            "blob": "67d3d2e719b11f00da0b30cc3ae664a4f863d14c",
+            "bytes": 78918,
+            "sha256": "986fce45e5fc58795ae2275410cb4a0cdca5e564d71c7b36569aaeaa39d7a4d7"
+          },
+          "after": {
+            "mode": "100644",
+            "blob": "7f1a27cf92e7866205813ee350a64a90e0615101",
+            "bytes": 79364,
+            "sha256": "5f8b665f80e05d67709ceab6ea1eaae913ca7b0268d01a9bed868f9bb12d0784"
+          }
+        }
+      ]
+    },
+    {
+      "patch": "0145-to-727d.patch",
+      "before_commit": "0145a2547a3025cc518cf3e2fa89d2e22cb73c08",
+      "after_commit": "727d66753814dc218e26d699e57402db2d13190a",
+      "after_tree": "d959ed0a4f8ab02947aec7569f3c0535a3cff533",
+      "paths": [
+        {
+          "path": "tools/test-recovery-namespace/main_windows.go",
+          "before": {
+            "mode": "100644",
+            "blob": "7300d3468dec41f56686c43a1064b76c4cf42e4f",
+            "bytes": 20381,
+            "sha256": "4c1c1f55c3f9841ce9a242b068e62e3843dd3f7ff4637a879e3e42513d6534eb"
+          },
+          "after": {
+            "mode": "100644",
+            "blob": "558a99c683b6d67a78ed6132ad36b1411035bb4e",
+            "bytes": 23594,
+            "sha256": "7d30a698fbe9521f853e2f7c0bd394796ac8fc2e16d5d28f4b62bff33898dbb8"
+          }
+        },
+        {
+          "path": "tools/test-recovery-namespace/prebuilt_windows.go",
+          "before": {
+            "mode": "100644",
+            "blob": "bccf22363c9ec2090e8ec380cc533322cba5b413",
+            "bytes": 22175,
+            "sha256": "9dad104853af599aee599ae4cbcb71c464d6f1f1b30e9656511d395685beb6c1"
+          },
+          "after": {
+            "mode": "100644",
+            "blob": "2899f095b9614293ad997a0b7192129ca459bd62",
+            "bytes": 22273,
+            "sha256": "cbbbf28bd340aaec42dbc34ad54a3e1e2960804d7e9260fcd6af2f56fe09def7"
+          }
+        },
+        {
+          "path": "tools/test-recovery-namespace/prebuilt_windows_test.go",
+          "before": {
+            "mode": "100644",
+            "blob": "d093c8d2611d095a2f11a35206b8841d76bf05a3",
+            "bytes": 6841,
+            "sha256": "8e659b9c01ba776f2d8b54207d8e5755e713675bb215116a2fdc43499f88395d"
+          },
+          "after": {
+            "mode": "100644",
+            "blob": "238b0057677dacd348cfb0fd9f3dbc9acd861009",
+            "bytes": 9127,
+            "sha256": "33b594ab4512bc8fbe8841682013eaca6f7be3937417846ad8d49a4cd6a1cbd2"
+          }
+        },
+        {
+          "path": "tools/test-recovery-namespace/prechild_refusal_windows_test.go",
+          "before": null,
+          "after": {
+            "mode": "100644",
+            "blob": "950066ad50e7a656bf13c9f5b37747481eb6d719",
+            "bytes": 2399,
+            "sha256": "0915fae460f6bb827d7c429699f7588d2fbb668cf40524f3ab6de67441a0fc31"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -190,40 +190,42 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker, coa
 	daemonStates := tracker.Snapshot()
 	statusNow := time.Now().UTC()
 
-	// Perf: take ONE OS port-owner snapshot for the whole refresh and resolve
-	// every daemon against it, instead of letting each daemon's liveness check
-	// spawn its own `netstat -ano` (15 running daemons → 15 spawns → ~730ms
-	// cold /api/status; same anti-pattern scan.go already fixed). Only when the
-	// global liveness probe HAS an OS-level port-owner lookup (Windows/Linux);
-	// when it is nil (macOS / other POSIX) we keep today's PortLive TCP fallback
-	// unchanged — no snapshot, no behavior change.
+	// Resolve every needed port from one snapshot per refresh. Inactive rows
+	// need no port observation and must not wait for a cold netstat query.
+	// Running liveness and pending-stop diagnostics share the same snapshot.
 	livenessProbe := supervisorLivenessProbeFns
 	var portOwnerSnapshot map[int]int
+	var loadPortOwners func()
 	if livenessProbe.PortOwnerPID != nil {
-		var snapshot map[int]int
 		var snapErr error
-		if coalescer != nil {
-			snapshot, snapErr = coalescer.Get()
-		} else {
-			// nil coalescer -> direct non-ctx probe, byte-identical to pre-fix
-			// (keeps the existing direct-call status tests valid).
-			snapshot, snapErr = loopbackPortOwnersSnapshotFn()
+		snapshotLoaded := false
+		loadPortOwners = func() {
+			if snapshotLoaded {
+				return
+			}
+			snapshotLoaded = true
+			if coalescer != nil {
+				portOwnerSnapshot, snapErr = coalescer.Get()
+			} else {
+				// Keep the existing direct-call seam when no coalescer is supplied.
+				portOwnerSnapshot, snapErr = loopbackPortOwnersSnapshotFn()
+			}
 		}
-		portOwnerSnapshot = snapshot
 		// Replace the per-port netstat lookup with a closure that resolves from
 		// the single shared snapshot. Semantics match the per-port path EXACTLY:
 		//   - snapshot error → every port returns that err → the daemon is
 		//     classified port_owner_unverified (within bind grace → live), the
 		//     same fail-closed outcome as a per-port netstat failure;
-		//   - port in map → its owner PID (== tracked PID → live; != → mismatch;
-		//     == supervisor self → port_owner_self);
+		//   - port in map → (owner PID, true, nil), classified by the existing
+		//     liveness predicate against the tracked daemon and supervisor;
 		//   - port NOT in map → (0, false, nil) = port_unbound, exactly what a
 		//     per-port netstat finding nothing returns.
 		livenessProbe.PortOwnerPID = func(port int) (int, bool, error) {
+			loadPortOwners()
 			if snapErr != nil {
 				return 0, false, snapErr
 			}
-			if pid, ok := snapshot[port]; ok {
+			if pid, ok := portOwnerSnapshot[port]; ok {
 				return pid, true, nil
 			}
 			return 0, false, nil
@@ -324,6 +326,11 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker, coa
 		var pidStatusErr error
 		usedPIDStatus := false
 		if ok && !stopPending && runtimeState.State == daemonRuntimeStateRunning {
+			// Keep the port snapshot before a potentially blocking process query.
+			// Inactive requests still avoid it entirely.
+			if loadPortOwners != nil {
+				loadPortOwners()
+			}
 			rowProbe := livenessProbe
 			if observe := rowProbe.PIDStatus; observe != nil {
 				usedPIDStatus = true
@@ -420,6 +427,9 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker, coa
 			}
 			if stopReceipt.FailureDetail != "" {
 				diagnostic["failure_detail"] = stopReceipt.FailureDetail
+			}
+			if loadPortOwners != nil {
+				loadPortOwners()
 			}
 			if ownerPID, ownerKnown := portOwnerSnapshot[port]; ownerKnown && ownerPID > 0 {
 				diagnostic["observed_port_owner_pid"] = ownerPID

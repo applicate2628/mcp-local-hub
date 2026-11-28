@@ -1,0 +1,431 @@
+"""DATA and adapter regression only; no OS child, native owner or old run access."""
+import sys
+sys.dont_write_bytecode = True
+
+import ast
+import copy
+from contextlib import contextmanager
+import hashlib
+import importlib.util
+import json
+from pathlib import Path
+import tempfile
+import subprocess
+import time
+import types
+import unittest
+from unittest.mock import patch
+
+
+ROOT = Path(__file__).resolve().parent
+
+
+def load(name, filename):
+    spec = importlib.util.spec_from_file_location(name, ROOT / "candidate" / filename)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+receiving = load("failed_canonical_receiving", "canonical_receiving_v4.py")
+adapter = load("failed_canonical_adapter", "literal_go_exec_adapter_ready_v1.py")
+adapter.canonical = receiving
+
+
+@contextmanager
+def fixture_directory():
+    # Keep these isolated DATA fixtures reviewable; no test deletes artifacts.
+    yield tempfile.mkdtemp(prefix="failed-data-", dir=ROOT / "checks")
+
+
+def fixture(run_root=r"D:\dev\ChatGPT\fresh-model\suite"):
+    def image(name):
+        return {"path": rf"D:\dev\ChatGPT\fresh-model\{name}.exe", "sha256": "a" * 64}
+
+    plan = {"schema": receiving.PLAN_SCHEMA, "profile": "full", "focused_case": "",
+        "binary": image("actor"), "product": image("product"), "fixture": image("fixture"),
+        "tools": {name: image(name) for name in ("powershell", "netstat", "netsh", "conhost")},
+        "source_dir": r"D:\dev\ChatGPT\fresh-model\source",
+        "original_args": ["-test.paniconexit0", "-test.v=test2json", "-test.count=1", "-test.timeout=5m"],
+        "expected_root_names": list(receiving.ROOTS)}
+    binding = {"plan": plan, "canonical_plan": run_root + r"\canonical-plan.json",
+        "canonical_plan_sha256": "b" * 64, "run_root": run_root}
+    cfg = {"Version": 2, "Test": receiving.ROOTS[0], "Image": plan["binary"]["path"],
+        "ImageSHA256": plan["binary"]["sha256"], "Fixture": plan["fixture"]["path"],
+        "FixtureSHA256": plan["fixture"]["sha256"], "Timeout": "4m0s",
+        "WorkDeadline": "2026-11-26T00:04:50Z", "CleanupDeadline": "2026-11-26T00:05:00Z"}
+    stream = {"WorkerReturned": True, "EOF": False, "Overflow": True, "Bytes": 8 << 20,
+        "ReadError": "original read failure", "ReaderCloseError": "", "WriterCloseError": "",
+        "WriterCloseAttempted": True, "WriterClosed": True, "ReaderClosed": True}
+    pins = [{"Role": role, "Acquired": True, "CloseAttempted": True, "Closed": True, "CloseError": "",
+        "Image": {"Path": source["path"], "SHA256": source["sha256"], "FileID": "file-" + role,
+                  "Bytes": 4096, "Machine": 0x8664}}
+        for role, source in {"actor": plan["binary"], "product": plan["product"], **plan["tools"]}.items()]
+    native = {"Case": receiving.SLOTS[receiving.ROOTS[0]],
+        "CaseTempRoot": receiving.ntpath.join(run_root, "channel", "gui-replay", "actor-tmp"),
+        "CommandPath": cfg["Image"], "CommandArgs": [cfg["Image"], "-test.paniconexit0", "-test.v",
+            "-test.count=1", "-test.timeout=" + cfg["Timeout"], "-test.run=^" + cfg["Test"] + "$"],
+        "WorkDeadline": cfg["WorkDeadline"], "CleanupDeadline": cfg["CleanupDeadline"],
+        "ClosureModel": receiving.CLOSURE_MODEL, "ClosureLimit": receiving.CLOSURE_LIMIT,
+        "NoCreateAttempted": False, "HostNoJobChecked": True, "KillOnExitArmed": True,
+        "CreatingThreadID": 43, "CreatingThreadSignaled": True, "CreatingThreadCloseAttempted": True,
+        "CreatingThreadClosed": True, "ImagePinClosed": True, "ImagePinsClosed": True, "ImagePins": pins,
+        "RootPID": 42, "RootWait": {"Returned": True, "Known": True, "ExitCode": 1},
+        "Processes": [{"PID": 42, "NativeBirthFILETIME": "1337", "InitialRoot": True,
+            "ExitEventReceived": True, "ExitContinued": True, "KernelSignaled": True, "ExitCode": 1,
+            "DuplicateCloseAttempted": True, "DuplicateClosed": True, "ImageFileAbsent": False,
+            "ImageFileCloseAttempted": True, "ImageFileClosed": True}],
+        "Threads": [{"PID": 42, "TID": 43, "KernelSignaled": True,
+            "DuplicateCloseAttempted": True, "DuplicateClosed": True}],
+        "PendingEvent": None, "EventLedgerFormat": receiving.EVENT_LEDGER_FORMAT, "ObservedEventCount": 2,
+        "Events": [{"Sequence": sequence, "PID": 42, "TID": 43, "Code": code,
+            "Continued": True, "ContinueStatus": 0x00010002, "ImageFilePresent": False}
+            for sequence, code in ((1, 3), (2, 5))], "AuxiliaryEvents": [],
+        "Stdout": copy.deepcopy(stream), "Stderr": copy.deepcopy(stream),
+        "NativeComplete": False, "IOComplete": False, "Complete": False, "Unknown": True,
+        "CompleteReceivedAt": "0001-01-01T00:00:00Z", "Failure": "original case cleanup expired"}
+    original = {"schema": receiving.SCHEMA, "canonical_plan": binding["canonical_plan"],
+        "canonical_plan_sha256": binding["canonical_plan_sha256"], "run_root": run_root,
+        "profile": plan["profile"], "focused_case": "", "binary": plan["binary"]["path"],
+        "binary_sha256": plan["binary"]["sha256"], "source_dir": plan["source_dir"], "args": plan["original_args"],
+        "fixture": plan["fixture"]["path"], "fixture_sha256": plan["fixture"]["sha256"],
+        "started_utc": "2026-11-26T00:00:00Z", "work_deadline": "2026-11-26T00:05:05Z",
+        "cleanup_deadline": "2026-11-26T00:05:15Z", "finished_utc": "2026-11-26T00:05:16Z",
+        "qualification_passed": False, "custody_retained": True, "failure": "original controller cleanup expired",
+        "cases": [{"test": name, "slot": receiving.SLOTS[name], "attempted": index == 0,
+            "config": cfg if index == 0 else {}, "native": copy.deepcopy(native) if index == 0 else None}
+            for index, name in enumerate(receiving.ROOTS)]}
+    root_identity = {"Known": True, "PID": 80, "NativeBirthFILETIME": 1234, "StartedAt": "original-model"}
+    proof = {key: original[key] for key in ("canonical_plan", "canonical_plan_sha256", "run_root", "profile",
+        "focused_case", "binary", "binary_sha256", "source_dir", "args", "work_deadline", "cleanup_deadline")}
+    proof.update(schema="canonical-external-failed-physical-closure-v1", images={"actor": plan["binary"],
+        "product": plan["product"], "fixture": plan["fixture"], "wmic": None, **plan["tools"]},
+        controller_pid=900, original_exit_code=1, original_failure=original["failure"],
+        original_result_path=receiving.ntpath.join(run_root, "result.json"), original_result_preserved=True,
+        received_utc="2026-11-26T00:06:00Z", physical_complete=True, outer_return_received=True,
+        outer_resources_finalized=True, outer_start_attempted=True, outer_root_identity=root_identity,
+        root_wait_known=True, root_exit_code=1, outer_native_snapshot={"RootIdentity": root_identity,
+            "NoChildKnown": False, "RootWaitKnown": True, "RootExitCode": 1, "HandlesClosed": True,
+            "MembersExited": True, "AccountingKnown": True, "FinalActive": 0, "Error": {"failed": True}},
+        outer_io_settlement={**{name: {"Acquired": True, "CloseAttempted": True, "Closed": True, "CloseError": None}
+            for name in ("Stdin", "StdoutRead", "StdoutWrite", "StderrRead", "StderrWrite")},
+            **{name: {"WorkerStarted": True, "WorkerComplete": True, "EOF": False,
+                "LimitExceeded": True, "Error": {"failed": True}} for name in ("Stdout", "Stderr")}},
+        control_joined=True, control_stopped=True, stdout_sink_closed=True, stderr_sink_closed=True,
+        cases=[{"test": name, "slot": receiving.SLOTS[name], "attempted": index == 0,
+            "original_return_received": index == 0, "original_owner_matched": index == 0,
+            "physical_complete": True, "stdin_closed": True, "native_no_create_received": False,
+            "native": native if index == 0 else None} for index, name in enumerate(receiving.ROOTS)],
+        qualification_passed=False, capture_access_issued=False, source_or_cache_access_issued=False,
+        new_commands_permitted=False, qualification_deadlines_extended=False)
+    return binding, original, proof
+
+
+class FailedPhysicalDataTests(unittest.TestCase):
+    def test_closed_originals_with_late_read_error_keep_failure(self):
+        binding, original, proof = fixture()
+        before = json.dumps(original, sort_keys=True)
+        facts = receiving.receive_failed(proof, binding, original, 900, 1)
+        self.assertTrue(facts["physical_complete"])
+        for name in ("qualification_passed", "capture_access_issued", "source_or_cache_access_issued",
+                     "new_commands_permitted", "qualification_deadlines_extended"):
+            self.assertIs(facts[name], False)
+        self.assertEqual(json.dumps(original, sort_keys=True), before)
+        self.assertGreater(receiving.instant(proof["received_utc"]), receiving.instant(original["cleanup_deadline"]))
+
+    def test_distinguishing_refusals(self):
+        mutations = {
+            "foreign plan": lambda p: p.update(canonical_plan_sha256="f" * 64),
+            "foreign controller": lambda p: p.update(controller_pid=901),
+            "changed failure": lambda p: p.update(original_failure="replacement"),
+            "changed deadline": lambda p: p.update(cleanup_deadline="2026-11-26T00:06:15Z"),
+            "new qualification": lambda p: p.update(qualification_passed=True),
+            "capture grant": lambda p: p.update(capture_access_issued=True),
+            "source grant": lambda p: p.update(source_or_cache_access_issued=True),
+            "new command grant": lambda p: p.update(new_commands_permitted=True),
+            "frozen outer incomplete": lambda p: p.update(outer_resources_finalized=False),
+            "outer worker pending": lambda p: p["outer_io_settlement"]["Stdout"].update(WorkerComplete=False),
+            "outer close failed": lambda p: p["outer_io_settlement"]["Stdin"].update(CloseError={"failed": True}),
+            "live outer member": lambda p: p["outer_native_snapshot"].update(FinalActive=1),
+            "new attempted case": lambda p: p["cases"][1].update(attempted=True),
+            "foreign original owner": lambda p: p["cases"][0].update(original_owner_matched=False),
+            "case worker pending": lambda p: p["cases"][0]["native"]["Stdout"].update(WorkerReturned=False),
+            "case reader close failed": lambda p: p["cases"][0]["native"]["Stderr"].update(ReaderCloseError="held"),
+            "unclosed process": lambda p: p["cases"][0]["native"]["Processes"][0].update(DuplicateClosed=False),
+            "unclosed thread": lambda p: p["cases"][0]["native"]["Threads"][0].update(DuplicateClosed=False),
+            "unclosed image": lambda p: p["cases"][0]["native"]["ImagePins"][0].update(Closed=False),
+            "pending event": lambda p: p["cases"][0]["native"].update(PendingEvent={"Code": 3}),
+            "uncontinued event": lambda p: p["cases"][0]["native"]["Events"][0].update(Continued=False),
+            "missing original event": lambda p: p["cases"][0]["native"].update(ObservedEventCount=3),
+            "changed qualification history": lambda p: p["cases"][0]["native"].update(Unknown=False),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(name=name):
+                binding, original, proof = fixture()
+                mutate(proof)
+                with self.assertRaises(ValueError):
+                    receiving.receive_failed(proof, binding, original, 900, 1)
+
+    def test_source_owned_no_create_requires_no_native_creation(self):
+        binding, original, proof = fixture()
+        native = proof["cases"][0]["native"]
+        native.update(NoCreateAttempted=True, RootPID=0, Processes=None, Threads=None, Events=None,
+                      AuxiliaryEvents=[], ObservedEventCount=0, RootWait={"Returned": False}, Unknown=False)
+        original["cases"][0]["native"]["Unknown"] = False
+        proof["cases"][0]["native_no_create_received"] = True
+        proof.update(outer_native_snapshot=None, outer_root_identity={"Known": False}, root_wait_known=False)
+        self.assertTrue(receiving.receive_failed(proof, binding, original, 900, 1)["physical_complete"])
+        # observeImage can fail after acquiring/closing a pin, and obtaining the
+        # native thread ID precedes adoption of its original handle.
+        native["ImagePins"][0]["Image"] = {}
+        native.update(CreatingThreadSignaled=False, CreatingThreadCloseAttempted=False, CreatingThreadClosed=False)
+        self.assertTrue(receiving.receive_failed(proof, binding, original, 900, 1)["physical_complete"])
+        native["RootPID"] = 42
+        with self.assertRaises(ValueError):
+            receiving.receive_failed(proof, binding, original, 900, 1)
+
+
+class AdapterFailedReceivingTests(unittest.TestCase):
+    def make_callback(self, root):
+        binding, original, proof = fixture(str(root))
+        original_path = root / "result.json"
+        original_path.write_text(json.dumps(original), encoding="utf-8")
+        (root / "failed-physical-closure.json").write_text(json.dumps(proof), encoding="utf-8")
+        row = {"argv": ["original-controller", "--same-original-args"], "cwd": binding["plan"]["source_dir"],
+               "original_pid": 900}
+        callback = adapter.canonical_failed_receiver(row["argv"], row["cwd"], original_path, binding)
+        return callback, row, binding, original_path
+
+    def test_actual_callback_reads_only_original_metadata_and_freezes_binding(self):
+        with fixture_directory() as path:
+            callback, row, binding, original_path = self.make_callback(Path(path))
+            before = original_path.read_bytes()
+            binding["plan"]["binary"]["sha256"] = "f" * 64
+            opened, actual_open = [], Path.open
+            def track(path, *args, **kwargs):
+                opened.append(path)
+                return actual_open(path, *args, **kwargs)
+            with patch.object(Path, "open", track), patch.object(adapter, "sha", side_effect=AssertionError("capture/source hash forbidden")):
+                original = callback.read_original_result()
+                self.assertEqual(callback.original_result_sha256(), hashlib.sha256(before).hexdigest())
+                facts = callback(row, 1)
+            self.assertTrue(facts["physical_complete"])
+            self.assertFalse(facts["qualification_passed"])
+            self.assertTrue(facts["metadata_handles_closed"])
+            self.assertEqual(original_path.read_bytes(), before)
+            self.assertIs(callback(row, 1), facts)
+            self.assertIs(callback.read_original_result(), original)
+            self.assertEqual(opened.count(original_path), 1)
+
+    def test_normal_reader_close_failure_permanently_holds_late_receiving(self):
+        with fixture_directory() as path:
+            root = Path(path)
+            callback, expected, binding, original_path = self.make_callback(root)
+            body = original_path.read_bytes()
+            processes = []
+            class CoreRun:
+                def __init__(self, root, env):
+                    self.root, self.env = root, env
+                    self.receipt = {"commands": [], "status": "FAIL"}
+                def save(self):
+                    pass
+            class Process:
+                def __init__(self, argv, **kwargs):
+                    self.pid, self.returncode, self.kwargs = 900, 1, kwargs
+                    processes.append(self)
+                def wait(self, timeout):
+                    return self.returncode
+            class FailedReader:
+                closed = False
+                closes = 0
+                error = OSError("original normal metadata reader close failed")
+                def read(self, *_args):
+                    return body
+                def close(self):
+                    self.closes += 1
+                    raise self.error
+                def __enter__(self):
+                    return self
+                def __exit__(self, *_args):
+                    self.close()
+            held = FailedReader()
+            guard = load("normal_reader_candidate_guard", "guard-custody.py")
+            guard.load_original_owner = lambda: None
+            core = types.SimpleNamespace(Run=CoreRun, REPO=root,
+                sha=lambda _: self.fail("capture hashing is forbidden"),
+                subprocess=types.SimpleNamespace(Popen=Process, CREATE_NO_WINDOW=0x08000000,
+                    DEVNULL=subprocess.DEVNULL, TimeoutExpired=subprocess.TimeoutExpired))
+            run = guard.make_guarded_run_class(core)(root, {})
+            run.command(expected["argv"], "suite-owner", cwd=expected["cwd"], timeout=320,
+                        check=False, defer_output=True, physical_receiver=callback)
+            command = run.receipt["commands"][0]
+            opened, actual_open = [], Path.open
+            def open_metadata(path, *args, **kwargs):
+                opened.append(path)
+                if path == original_path and opened.count(path) == 1:
+                    return held
+                return actual_open(path, *args, **kwargs)
+            plan = binding["plan"]
+            with patch.object(Path, "open", open_metadata):
+                with self.assertRaises(OSError) as caught:
+                    adapter.finalize_owner_capture(run, command, "canonical", original_path, "owner",
+                        plan["binary"]["path"], plan["binary"]["sha256"], plan["source_dir"],
+                        plan["original_args"], False, binding, canonical_receiver=callback)
+                self.assertIs(caught.exception, held.error)
+                original_states = run.quiescence_snapshot()
+                for _ in range(2):
+                    late = run.receive_failed_worker_closure(time.monotonic() + 1)
+                    self.assertEqual(late["status"], "UNKNOWN")
+                    self.assertIs(late["qualification_passed"], False)
+                    self.assertIs(late["capture_access_issued"], False)
+                with self.assertRaises(RuntimeError):
+                    callback.original_result_sha256()
+            self.assertEqual(opened, [original_path])
+            self.assertEqual(held.closes, 1)
+            self.assertFalse(run.commands_quiescent())
+            self.assertEqual(run.quiescence_snapshot(), original_states)
+            self.assertFalse(command["captures_measured"])
+            self.assertTrue(all(not processes[0].kwargs[side].closed for side in ("stdout", "stderr")))
+            # Only model-owned regular files are released after recording HOLD.
+            for side in ("stdout", "stderr"):
+                processes[0].kwargs[side].close()
+
+    def test_foreign_original_row_is_refused_before_read(self):
+        with fixture_directory() as path:
+            callback, row, _, _ = self.make_callback(Path(path))
+            row["argv"] = ["replacement-controller"]
+            with patch.object(Path, "open", side_effect=AssertionError("foreign row must not read")):
+                with self.assertRaises(ValueError):
+                    callback(row, 1)
+
+    def test_read_close_failure_is_retained_without_retry(self):
+        with fixture_directory() as path:
+            callback, row, _, _ = self.make_callback(Path(path))
+            class FailedFile:
+                closed = False
+                closes = 0
+                def read(self, _limit):
+                    return b"{}"
+                def close(self):
+                    self.closes += 1
+                    raise OSError("original metadata close failed")
+            held = FailedFile()
+            with patch.object(Path, "open", return_value=held) as opened:
+                with self.assertRaises(OSError):
+                    callback(row, 1)
+                with self.assertRaises(RuntimeError):
+                    callback(row, 1)
+                self.assertEqual(opened.call_count, 1)
+                self.assertEqual(held.closes, 1)
+
+    def test_callback_is_passed_before_raw_command_can_time_out(self):
+        callback = lambda row, code: {"physical_complete": True}
+        calls = []
+        def command(*args, **kwargs):
+            calls.append(kwargs)
+            raise TimeoutError("original model timeout")
+        run = types.SimpleNamespace(command=command)
+        with self.assertRaises(TimeoutError):
+            adapter.raw_command(run, ["controller"], "suite-owner", "source", 320,
+                                physical_receiver=callback)
+        self.assertIs(calls[0]["physical_receiver"], callback)
+        self.assertTrue(calls[0]["defer_output"])
+        self.assertEqual(calls[0]["timeout"], 320)
+
+    def test_actual_issuer_and_existing_core_finalizer_receive_same_custody(self):
+        # Compile only the exact existing method. Importing its large module
+        # would activate unrelated native/cache environment setup.
+        source_path = ROOT.parent / "external-owner-inputs/public-v13-qualified_windows_products_consumer_v1.py"
+        source = source_path.read_bytes()
+        self.assertEqual(hashlib.sha256(source).hexdigest(),
+                         "e11118b22a6d805fd9984c885fb646e29638777b46b2227c788864c8d6d7953d")
+        run_class = next(node for node in ast.parse(source).body if isinstance(node, ast.ClassDef) and node.name == "Run")
+        method = next(node for node in run_class.body if isinstance(node, ast.FunctionDef)
+                      and node.name == "retain_failed_full_workers")
+        self.assertEqual(hashlib.sha256(ast.dump(method, include_attributes=False).encode("utf-8")).hexdigest(),
+                         "1d32f9a1b4488234e6eff022998334aecf407b0e5a3acbf333fe98f95a2aa8cc")
+        loop_line = next(node.lineno for node in ast.walk(method) if isinstance(node, ast.While))
+        namespace = {"sys": sys, "time": time}
+        exec(compile(ast.Module(body=[method], type_ignores=[]), str(source_path), "exec"), namespace)
+        existing_finalizer = namespace["retain_failed_full_workers"]
+
+        with fixture_directory() as path:
+            root = Path(path)
+            callback, expected_row, _, _ = self.make_callback(root)
+            hashes, processes, stopped = [], [], []
+
+            def metadata_sha(path):
+                self.assertEqual(path, root / "receipt.json")
+                hashes.append(path)
+                return hashlib.sha256(path.read_bytes()).hexdigest()
+
+            def publish(path, value):
+                with path.open("x", encoding="utf-8") as target:
+                    target.write(json.dumps(value))
+
+            namespace.update(sha=metadata_sha, new_json=publish)
+
+            class CoreRun:
+                retain_failed_full_workers = existing_finalizer
+                def __init__(self, root, env):
+                    self.root, self.env = root, env
+                    self.receipt = {"commands": [], "status": "FAIL"}
+                    self.final_receipt_published = True
+                def save(self):
+                    (self.root / "receipt.json").write_text(json.dumps(self.receipt), encoding="utf-8")
+
+            class Process:
+                def __init__(self, argv, **kwargs):
+                    self.pid, self.returncode, self.kwargs = 900, None, kwargs
+                    self.expired = subprocess.TimeoutExpired(argv, 320)
+                    processes.append(self)
+                def wait(self, timeout):
+                    if self.returncode is None:
+                        raise self.expired
+                    return self.returncode
+
+            guard = load("finalizer_candidate_guard", "guard-custody.py")
+            guard.load_original_owner = lambda: None
+            core = types.SimpleNamespace(Run=CoreRun, REPO=root,
+                sha=lambda _: self.fail("capture hashing is forbidden"),
+                subprocess=types.SimpleNamespace(Popen=Process, CREATE_NO_WINDOW=0x08000000,
+                    DEVNULL=subprocess.DEVNULL, TimeoutExpired=subprocess.TimeoutExpired))
+            run = guard.make_guarded_run_class(core)(root, {})
+            with self.assertRaises(subprocess.TimeoutExpired):
+                run.command(expected_row["argv"], "suite-owner", cwd=expected_row["cwd"], timeout=320,
+                            check=False, defer_output=True, physical_receiver=callback)
+            before, states = (root / "receipt.json").read_bytes(), run.quiescence_snapshot()
+            processes[0].returncode = 1
+            issuer = types.SimpleNamespace(stop_phase=lambda: stopped.append(True), invocations=[run])
+            # The real finalizer intentionally waits forever on HOLD. Bound only
+            # this model test at its outer loop line, outside the caught body.
+            attempts = 0
+            def bounded_model(frame, event, _argument):
+                nonlocal attempts
+                if frame.f_code is existing_finalizer.__code__ and event == "line" and frame.f_lineno == loop_line:
+                    attempts += 1
+                    if attempts > 2:
+                        raise AssertionError("actual existing finalizer did not receive this model's closed originals")
+                return bounded_model
+            previous_trace = sys.gettrace()
+            try:
+                sys.settrace(bounded_model)
+                adapter.OriginalInvocationIssuer.retain_failed_invocations(issuer)
+            finally:
+                sys.settrace(previous_trace)
+            self.assertEqual(stopped, [True])
+            self.assertTrue(run._failed_full_physical_closed)
+            self.assertFalse(run.commands_quiescent())
+            self.assertEqual(run.quiescence_snapshot(), states)
+            self.assertEqual((root / "receipt.json").read_bytes(), before)
+            self.assertEqual(hashes, [root / "receipt.json"])
+            self.assertTrue(all(processes[0].kwargs[side].closed for side in ("stdout", "stderr")))
+            received = json.loads((root / "failed-original-physical-closure.json").read_bytes())
+            self.assertEqual(received["status"], "CLOSED")
+            self.assertEqual(received["original_gate_status"], "FAIL")
+            self.assertIs(received["original_gate_reclassified"], False)
+            self.assertIs(received["physical_receiving"]["qualification_passed"], False)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

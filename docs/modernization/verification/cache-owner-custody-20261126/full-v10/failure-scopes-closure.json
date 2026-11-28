@@ -1,0 +1,176 @@
+{
+  "schema": "full-v10-failure-scope-closure-v1",
+  "parent_sha256": "3812d74a5a4b9d02eabae0a05a67ba7bb3dd79a729b40d91d29e05d0fbf6e7cb",
+  "receipt_sha256": "555263b0add9ceec75e35967bc62e84c68c5e820e2e9bf5ba48be8bf551a225b",
+  "status": "FOUR_FAILURE_SCOPES_CLOSED",
+  "scope_count": 4,
+  "commands_received": 28,
+  "native_owner_receipts_received": 6,
+  "scopes": [
+    {
+      "run": "<TASK>\\runs\\x4ec66191aa9c",
+      "phase": "default",
+      "package": "mcp-local-hub/internal/api",
+      "receipt_sha256": "5af9610a2d6d8f8cde62f01122675b72c8a58c3f1f71e135856815a6df9b4bbd",
+      "commands_received": 6,
+      "native_owners_received": 1,
+      "original_replay_matches": true,
+      "status": "CLOSED_FAIL",
+      "preparation_seconds": 40.89309450000292,
+      "preparation_budget_seconds": 30,
+      "suite_started": false,
+      "adapter_exit_code": 1,
+      "error": "RuntimeError: adapter preparation exceeded its fixed budget; full suite was not started",
+      "top_level_outcomes": {}
+    },
+    {
+      "run": "<TASK>\\runs\\xe7b6d03d7f69",
+      "phase": "default",
+      "package": "mcp-local-hub/internal/cli",
+      "receipt_sha256": "3002aab883b49931de5282d97ecb5e2c80495efac582527a561f5f8c519a42cb",
+      "commands_received": 6,
+      "native_owners_received": 1,
+      "original_replay_matches": true,
+      "status": "CLOSED_FAIL",
+      "preparation_seconds": 48.9291685000062,
+      "preparation_budget_seconds": 30,
+      "suite_started": false,
+      "adapter_exit_code": 1,
+      "error": "RuntimeError: adapter preparation exceeded its fixed budget; full suite was not started",
+      "top_level_outcomes": {}
+    },
+    {
+      "run": "<TASK>\\runs\\x46bc4c776039",
+      "phase": "state",
+      "package": "mcp-local-hub/internal/api",
+      "receipt_sha256": "a78fd365dc81daaafcf0d190a869fc9411a4cd137851c492cd7d3955303046b9",
+      "commands_received": 8,
+      "native_owners_received": 2,
+      "original_replay_matches": true,
+      "status": "CLOSED_FAIL",
+      "preparation_seconds": 12.103593699983321,
+      "preparation_budget_seconds": 30,
+      "suite_started": true,
+      "adapter_exit_code": 2,
+      "error": "RuntimeError: original suite, inventory ledger, image, or custody proof failed",
+      "top_level_outcomes": {
+        "NOT_RUN": 3262,
+        "pass": 266,
+        "skip": 1
+      }
+    },
+    {
+      "run": "<TASK>\\runs\\x06928e6b162c",
+      "phase": "state",
+      "package": "mcp-local-hub/internal/cli",
+      "receipt_sha256": "fea5c6ee601794f625a6fa496a79b7d44e4d3d04fba35cbf3ac0b6ccdfeceb55",
+      "commands_received": 8,
+      "native_owners_received": 2,
+      "original_replay_matches": true,
+      "status": "CLOSED_FAIL",
+      "preparation_seconds": 18.686208600003738,
+      "preparation_budget_seconds": 30,
+      "suite_started": true,
+      "adapter_exit_code": 2,
+      "error": "RuntimeError: original suite, inventory ledger, image, or custody proof failed",
+      "top_level_outcomes": {
+        "pass": 980,
+        "NOT_RUN": 1000,
+        "skip": 11
+      }
+    }
+  ],
+  "original_owners": [
+    {
+      "path": "<TASK>\\runs\\x4ec66191aa9c\\inventory\\result.json",
+      "sha256": "89764a005371bfdc345ff935bcf27a61c105ef479d94b1e1c6a1a959bcffbf9b",
+      "kind": "contained",
+      "original_pid": 267176,
+      "original_birth": 134400167749001843,
+      "exit_code": 0,
+      "native_tree_and_io_closed": true
+    },
+    {
+      "path": "<TASK>\\runs\\xe7b6d03d7f69\\inventory\\result.json",
+      "sha256": "04106826ae5c9bc3bbd737d7e4746e6874540c8e63d90ebb959739d506243fc0",
+      "kind": "contained",
+      "original_pid": 246788,
+      "original_birth": 134400169444486893,
+      "exit_code": 0,
+      "native_tree_and_io_closed": true
+    },
+    {
+      "path": "<TASK>\\runs\\x46bc4c776039\\inventory\\result.json",
+      "sha256": "7ddb51ba59fb6c475699eb2debd36fe8d3b0f9f2c5c1c16d8d81af75e6a36ab1",
+      "kind": "contained",
+      "original_pid": 243292,
+      "original_birth": 134400178554361666,
+      "exit_code": 0,
+      "native_tree_and_io_closed": true
+    },
+    {
+      "path": "<TASK>\\runs\\n3ebd4df8a058\\n\\namespace-suite-receipt.json",
+      "sha256": "84ce18fc8d015ab3bf853be678ad0593ebc45ad6190e52658fb3bf5514c6e2e9",
+      "kind": "namespace",
+      "original_pid": 238012,
+      "original_birth": 134400178582482254,
+      "exit_code": 2,
+      "native_tree_and_io_closed": true
+    },
+    {
+      "path": "<TASK>\\runs\\x06928e6b162c\\inventory\\result.json",
+      "sha256": "ac0e8f162c0b90fdc2bce0852ccdd6c4b0583e0d79499780878eeebf6e531704",
+      "kind": "contained",
+      "original_pid": 265024,
+      "original_birth": 134400182253899694,
+      "exit_code": 0,
+      "native_tree_and_io_closed": true
+    },
+    {
+      "path": "<TASK>\\runs\\x06928e6b162c\\suite\\result.json",
+      "sha256": "edd692c5e03487b3c041e3931895c4875353745bf90e67a42ce53d4080fb5fd3",
+      "kind": "canonical",
+      "original_pid": 233820,
+      "original_birth": 134400182288914390,
+      "exit_code": 2,
+      "native_tree_and_io_closed": true
+    }
+  ],
+  "capture_read_scope": [
+    {
+      "run": "x46bc4c776039",
+      "phase": "state",
+      "package": "mcp-local-hub/internal/api",
+      "path": "<TASK>\\runs\\x46bc4c776039\\suite-owner.stderr.txt",
+      "sha256": "2502c4a9dc570c1d185cb57ba1a5785a247ed05b84d8b6da6270cae9bab984af",
+      "label": "suite-owner.stderr.txt"
+    },
+    {
+      "run": "x46bc4c776039",
+      "phase": "state",
+      "package": "mcp-local-hub/internal/api",
+      "path": "<TASK>\\runs\\x46bc4c776039\\suite-events.stdout.txt",
+      "sha256": "892ba82d2e61d2d93e527f426597112d2394357d9b4e7b3d65ad1b4bbf924dac",
+      "label": "suite-events.stdout.txt"
+    },
+    {
+      "run": "x06928e6b162c",
+      "phase": "state",
+      "package": "mcp-local-hub/internal/cli",
+      "path": "<TASK>\\runs\\x06928e6b162c\\suite-owner.stderr.txt",
+      "sha256": "787309835a8deec0b202969db26a9b3943985dea17dcc4e46729aafb25231664",
+      "label": "suite-owner.stderr.txt"
+    },
+    {
+      "run": "x06928e6b162c",
+      "phase": "state",
+      "package": "mcp-local-hub/internal/cli",
+      "path": "<TASK>\\runs\\x06928e6b162c\\suite-events.stdout.txt",
+      "sha256": "97fde272513f69f2cbc824e9edf9e133173dc06e0b1c069b460c73a8f5a23920",
+      "label": "suite-events.stdout.txt"
+    }
+  ],
+  "other_62_adapter_closure_not_independently_reloaded": true,
+  "old_unknown_reclassified": false,
+  "reuse_or_cleanup_granted": false
+}

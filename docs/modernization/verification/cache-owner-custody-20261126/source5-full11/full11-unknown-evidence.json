@@ -1,0 +1,323 @@
+{
+  "schema": "full11-failed-open-custody-evidence-v1",
+  "status": "FAIL_WITH_UNRESOLVED_ORIGINAL_CUSTODY_PARENT_NOT_TERMINAL",
+  "evidence_cut_utc": "2026-11-26T00:51:33.375662+00:00",
+  "scope": "Local review of received controls and frozen code; no native execution or capture/source/cache reads.",
+  "test_source_commit": "001648f44bf6ef0191f1e21d92f1aecf2a2a3022",
+  "product_source_commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+  "parent": {
+    "DC_session": "267864",
+    "original_driver_pid": "482868",
+    "last_received_control_state": "running",
+    "terminal_exit_received": false,
+    "parent_capture_files_closed": false,
+    "terminal_observation": "Original DC terminal result unreceived; repeated parent control byte-identical with state=running. No process-liveness claim.",
+    "metadata_recorded_utc": "2026-11-26 00:53:25 UTC",
+    "late_control_matches_original_bytes": true
+  },
+  "outer": {
+    "basis": "Exact original failure control; raw SHA matched the new fixed metadata-only observation-v2.",
+    "status": "FAIL",
+    "finished_utc": "2026-11-26T00:40:26Z",
+    "command_count": 16,
+    "preparation_complete_reported": 13,
+    "build": {
+      "exit_code": 0,
+      "seconds": 243.71791680000024
+    },
+    "vet": {
+      "exit_code": 0,
+      "seconds": 271.9841807000339
+    },
+    "literal_default": {
+      "exit_code": 1,
+      "seconds": 1332.031,
+      "quiescence_state": "unknown"
+    },
+    "tagged": "NOT_RUN",
+    "command_quiescence_complete": false,
+    "literal_phases_received": 0,
+    "aggregate_coverage_records": 0,
+    "literal_pre_push_commands_passed": false,
+    "failure": "RuntimeError: an original receiver retained unknown custody",
+    "finished_field_does_not_establish_process_exit": true,
+    "original_invocation_issuer": {
+      "worker_joined": true,
+      "failure": "RuntimeError: original invocation UNKNOWN; root retains its actual owners",
+      "publication_errors": [],
+      "actual_invocations_retained": 15,
+      "ownership_survives_cmd_go_consumer_exit": true
+    },
+    "finalization_observations": {
+      "resource_disposition": "NOT_PERFORMED",
+      "source_after": "NOT_PERFORMED",
+      "input_hashes": "NOT_PERFORMED"
+    },
+    "ordinary_complete_native_IO_metadata_received": 15,
+    "original_worker_join_observations_received": 30
+  },
+  "api": {
+    "run": "<TASK>\\runs\\x28e371b95a91",
+    "receipt_status": "FAIL",
+    "adapter_exit_code": 1,
+    "suite": "NOT_STARTED",
+    "preparation_seconds": 31.00831659999676,
+    "fixed_preparation_budget_seconds": 30,
+    "original_commands_received_complete": 6,
+    "ordinary_commands": 5,
+    "inventory_owner_commands": 1,
+    "inventory_names": 3523,
+    "inventory_names_are_not_test_PASS": true,
+    "inventory_owner_command_seconds": 21.44,
+    "controller_started_utc": "2026-11-26T00:22:48.6031039Z",
+    "child_started_utc": "2026-11-26T00:23:06.669658Z",
+    "interval_to_child_birth_seconds": 18.0665541,
+    "interval_is_not_isolated_CreateProcess_measurement": true,
+    "native_custody_settled": true,
+    "commands_quiescent": true,
+    "latency_cause": "UNKNOWN"
+  },
+  "cli": {
+    "run": "<TASK>\\runs\\x42df81521075",
+    "receipt_status": "FAIL",
+    "adapter_exit_code": 1,
+    "suite": "STARTED_CUSTODY_UNRESOLVED",
+    "preparation_seconds": 24.089545199996792,
+    "fixed_preparation_budget_seconds": 30,
+    "commands": 7,
+    "received_complete_before_suite": 6,
+    "suite_owner_state": "unknown",
+    "external_watchdog_seconds": 320,
+    "suite_owner_actual_seconds": 323.852,
+    "invocation_seconds": 347.94548749999376,
+    "original_test_arguments": [
+      "-test.paniconexit0",
+      "-test.v=test2json",
+      "-test.count=1",
+      "-test.timeout=5m0s"
+    ],
+    "canonical_plan_sha256": "7ceeab5b2451e20498298b9585a37c29497c4ed6fb76536ccc60de5adb7289f9",
+    "image_sha256": "a279bae94d783bb9e86ae6fe0b908591937390a5e438e3ea0f00d9559d4f2f07",
+    "inventory_names": 1988,
+    "native_custody_settled": false,
+    "commands_quiescent": false,
+    "captures_measured": false,
+    "absent_suite_proofs": [
+      "exit_code",
+      "original_pid",
+      "native",
+      "io",
+      "completion_receiving"
+    ],
+    "absent_invocation_proofs": [
+      "owner",
+      "canonical_receiving",
+      "coverage",
+      "raw_replay",
+      "raw_output_binding"
+    ],
+    "individual_test_outcomes": "UNRECEIVED; no inference from inventory or elapsed time",
+    "original_suite_result_availability": "Root fixed metadata read returned ENOENT; no result control received by this reviewer."
+  },
+  "checked_metadata": {
+    "two_completion_receipt_hash_bindings": true,
+    "two_request_nonce_bindings": true,
+    "ten_ordinary_commands_native_and_IO_closure_fields": true,
+    "two_inventory_original_native_and_IO_proofs": true,
+    "raw_captures_read": false,
+    "suite_timeout_reason": "External TimeoutExpired; no accepted canonical physical-completion proof",
+    "outer_15_original_native_and_IO_closures": true,
+    "outer_30_original_worker_joins": true
+  },
+  "ownership_finding": {
+    "id": "F11-DEFERRED-OWNER-01",
+    "classification": "Confirmed static custody/receiving gap on the executed external-deferred branch.",
+    "retained": [
+      "Parent original Popen for the Python driver plus its original stdout/stderr file handles until direct exit.",
+      "Root OriginalInvocationIssuer, actual Invocation in records and invocations, original command row and immutable FAIL metadata.",
+      "Previously closed ordinary owners/readers retained by guard; they are not the external suite owner."
+    ],
+    "missing_external_path": "raw_command uses defer_output=True. Guard.command invokes subprocess.run and does not register this row in RETAINED_COMMANDS. On TimeoutExpired it publishes unknown and raises before finalize_owner_capture.",
+    "physical_receiver": "receive_failed_worker_closure finds original ordinary Run+row identity only. This row yields UNKNOWN: no one original ordinary custody for this Run.",
+    "finalizer": "retain_failed_invocations invokes retain_failed_full_workers. The latter repeats this receiver and publishes failed-original-physical-closure.json only after CLOSED; no branch rebuilds external original ownership.",
+    "runtime_position": "Exact current Python stack was not observed; retention-loop location is a code consequence if the finalizer has been entered.",
+    "not_claimed": [
+      "External process-tree death",
+      "Original canonical Go objects still available",
+      "Successful native settlement",
+      "Late original controller result exists",
+      "Full gate PASS"
+    ]
+  },
+  "held_boundaries": {
+    "active_or_uncertain": [
+      "<TASK>\\runs\\literal-final-v11",
+      "<TASK>\\runs\\x42df81521075",
+      "<TASK>\\native-consumer-source-v5",
+      "<TASK_WORKSPACE>\\d11",
+      "<TASK_WORKSPACE>\\s11"
+    ],
+    "included_dependents": [
+      "full11 seed-modules and isolated-build-cache",
+      "Go tmp and incoming/executing images",
+      "per-invocation bundle/profile/evidence and canonical descendants",
+      "staged internal/api/zz_qualified_api_versioninfo_windows_amd64.syso",
+      "all full11 raw captures and result recovery evidence"
+    ],
+    "api_scope": "API invocation is closed-failed; preserve its evidence without treating it as the unresolved CLI suite.",
+    "unchanged_prior_holds": [
+      "held v7",
+      "x6d9108ff9d42",
+      "held source-v1 and caches"
+    ],
+    "prohibited_without_original_receiving": [
+      "rehash raw captures/source/cache",
+      "cleanup or trash transfer",
+      "cache/source reuse by a successor",
+      "PID reopening or ownership reconstruction",
+      "new launches or deadline extensions"
+    ],
+    "not_a_global_hold": "Previously accepted immutable DATA/source controls and separately retired resources keep their scoped status; no full11 PASS is transferred."
+  },
+  "bounded_metadata_observation_paths": [
+    {
+      "path": "<TASK>\\literal-final-v11-launch.json",
+      "purpose": "Original parent terminal/wait/capture-close control; retained original DC session only."
+    },
+    {
+      "path": "<TASK>\\runs\\literal-final-v11\\receipt.json",
+      "purpose": "Driver status, command states and finalization metadata; no source or capture reads."
+    },
+    {
+      "path": "<TASK>\\runs\\literal-final-v11\\unsafe-stop.json",
+      "purpose": "Immutable unsafe-stop reason and exact invocation pointer."
+    },
+    {
+      "path": "<TASK>\\runs\\x42df81521075\\receipt.json",
+      "purpose": "Frozen CLI failure control; expected current SHA b528c7d40054aaecdb4e69c119ffe90f161f33e6539c42ea65a8872b54d70c50"
+    },
+    {
+      "path": "<TASK>\\runs\\literal-final-v11\\invocations-default\\fab022e78de0af6508224bc89015e02d23f9aca216c48990be95b2e74189582e.completed.json",
+      "purpose": "Bound CLI completion metadata, not a native closure grant."
+    },
+    {
+      "path": "<TASK>\\runs\\literal-final-v11\\invocations-default\\requests\\fab022e78de0af6508224bc89015e02d23f9aca216c48990be95b2e74189582e.response.json",
+      "purpose": "Original issuer response binding; replay must remain absent when custody is incomplete."
+    },
+    {
+      "path": "<TASK>\\runs\\x42df81521075\\suite\\result.json",
+      "purpose": "Original canonical control only; root fixed read returned ENOENT. Any future file requires original binding/physical receiving; no raw access granted."
+    },
+    {
+      "path": "<TASK>\\runs\\x42df81521075\\failed-original-physical-closure.json",
+      "purpose": "Conditional original physical-only proof; current ordinary-only receiver cannot produce CLOSED for this external row. Do not treat absence as a reason to retry or rebuild ownership."
+    }
+  ],
+  "metadata_observation_rule": "Fixed bounded ordinary metadata only; preserve bytes and integer precision. No raw/source/cache grant.",
+  "transport": {
+    "api_native_bytes": 332910,
+    "cli_native_bytes": 245800,
+    "api_native_CRLF_count": 5547,
+    "cli_native_CRLF_count": 4176,
+    "received_text_to_native_bytes": "Only LF to CRLF reconstruction, verified byte-exact and SHA-equal to each completion receipt pin.",
+    "JSON_reserialization_used_to_recover_native_bytes": false,
+    "large_native_integers_parsed_with": "Python; no JS numeric conversion",
+    "outer_native_bytes": 636357,
+    "outer_native_CRLF_count": 7732,
+    "outer_LF_to_CRLF_byte_exact": true,
+    "separate_raw_full_root_receipt_now_received": true
+  },
+  "preserved_gates": {
+    "literal_argv_unchanged": true,
+    "Go_test_timeout": "5m",
+    "adapter_preparation_seconds": 30,
+    "owner_external_watchdog_seconds": 320,
+    "outer_parent_diagnostic_seconds": 4800,
+    "previous_ordinary14_and_composition2_PASS_scope": "Unchanged historical qualifications; do not prove external-deferred timeout custody.",
+    "full_regression_PASS": false,
+    "tagged_full_PASS": false,
+    "source_or_runtime_changed_by_this_review": false
+  },
+  "inputs": {
+    "api": {
+      "path": "recovery/full-v11/default-api-receipt.json",
+      "bytes": 332910,
+      "sha256": "9468dd8a9c5cb408a0a954f9c35f64959a461d66d4c9606a72d7b6a739c8f2b0"
+    },
+    "cli": {
+      "path": "recovery/full-v11/default-cli-receipt.json",
+      "bytes": 245800,
+      "sha256": "b528c7d40054aaecdb4e69c119ffe90f161f33e6539c42ea65a8872b54d70c50"
+    },
+    "api_completion": {
+      "path": "recovery/full-v11/default-api-completion.observed.txt",
+      "bytes": 447,
+      "sha256": "7abd78bdd73f24a4dc75cadea9610706c383af8e767a0d8357c78aba7f7463a6"
+    },
+    "cli_completion": {
+      "path": "recovery/full-v11/default-cli-completion.observed.txt",
+      "bytes": 449,
+      "sha256": "0679eaa1c218f71ac1ec50727cf8a3506237a8ed0703cb7636f3cc1dd59ca660"
+    },
+    "unsafe_stop": {
+      "path": "recovery/full-v11/unsafe-stop.observed.txt",
+      "bytes": 288,
+      "sha256": "c217437c17dd4e315b22166bf394036f27796eece58f8a971baff4a2bc70f28d"
+    },
+    "outer_projection": {
+      "path": "recovery/full-v11/progress-202611260051333756620000.json",
+      "bytes": 3409,
+      "sha256": "e62c38f12a8cc44d67d945b0bc1361f14a3a3ac3e1bef31e675d79be87236157"
+    },
+    "parent_running": {
+      "path": "recovery/full-v11/parent-running-observation.json",
+      "bytes": 22318,
+      "sha256": "7c8118b70db47baf56e58d4a1a58b80538c488d098d3441f7bf0226dd223f8c0"
+    },
+    "launch_tracking": {
+      "path": "recovery/full-v11/native-launch-tracking.json",
+      "bytes": 902,
+      "sha256": "369cdf40f57b3d9cf7c64343b621690ce3cd268d2125277876fa708986a5d2ea"
+    },
+    "guard": {
+      "path": "recovery/qualification/guard-custody.py",
+      "bytes": 39283,
+      "sha256": "56d6ccee190472cbdacd5f0ec5f7636df3487f27ec208e0776c20c12a22b72f2"
+    },
+    "adapter": {
+      "path": "recovery/runtime-v14-preparation-v1/bound-final-v1/runtime/literal_go_exec_adapter_ready_v1.py",
+      "bytes": 58244,
+      "sha256": "ef393445772f2efbf977d76719528af6706b1e1e394bfd3e0c2e3f1dd60ba450"
+    },
+    "core": {
+      "path": "recovery/runtime-v14-preparation-v1/bound-final-v1/runtime/qualified_windows_products_consumer_v1.py",
+      "bytes": 126758,
+      "sha256": "b679aadd8455cb70c8a445e3abf99484edaf76208fffc0f8347100d12c5976c8"
+    },
+    "driver": {
+      "path": "recovery/runtime-v14-preparation-v1/bound-final-v1/runtime/run_literal_go_gate_ready_v1.py",
+      "bytes": 50292,
+      "sha256": "cf43b7c8c95bb3585bd1c921ba553ddd23c003410742cb36ce23794862f9d391"
+    },
+    "parent_code": {
+      "path": "recovery/runtime-v14-preparation-v1/bound-final-v1/launch_literal_final_v14.py",
+      "bytes": 28208,
+      "sha256": "b031831ac7ca2425b970df6afb01a69382a6e5d1cd83c7910a6e2a4177612faa"
+    },
+    "runtime_manifest": {
+      "path": "recovery/runtime-v14-preparation-v1/bound-final-v1/actual-manifest.json",
+      "bytes": 8865,
+      "sha256": "15756f71977804cb683ac3cc27f15b7eae1c2b869d28db94c2f501816ee807c8"
+    },
+    "outer_original": {
+      "path": "recovery/full-v11/outer-failure-receipt.json",
+      "bytes": 636357,
+      "sha256": "5acba4934a788bfbe67b36b17601ec490aaef9ea40439253e5369f8e7f264901"
+    },
+    "late_metadata": {
+      "path": "recovery/full-v11/metadata-read-observations.json",
+      "bytes": 713,
+      "sha256": "245e56cfe9b83d2f4602a7e106b4e878fceef036e90f0dd1bd0dbb7371631e49"
+    }
+  }
+}

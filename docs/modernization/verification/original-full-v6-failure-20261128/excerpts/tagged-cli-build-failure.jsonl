@@ -1,0 +1,6 @@
+{"ImportPath":"mcp-local-hub/internal/cli [mcp-local-hub/internal/cli.test]","Action":"build-output","Output":"# mcp-local-hub/internal/cli [mcp-local-hub/internal/cli.test]\n"}
+{"ImportPath":"mcp-local-hub/internal/cli [mcp-local-hub/internal/cli.test]","Action":"build-output","Output":"internal\\cli\\attach_client_real_supervisor_windows_test.go:109:24: assignment mismatch: 3 variables but startSuperviseForIPCTest returns 4 values\n"}
+{"ImportPath":"mcp-local-hub/internal/cli [mcp-local-hub/internal/cli.test]","Action":"build-fail"}
+{"Time":"2026-11-28T15:14:52.5075979+03:00","Action":"start","Package":"mcp-local-hub/internal/cli"}
+{"Time":"2026-11-28T15:14:52.5075979+03:00","Action":"output","Package":"mcp-local-hub/internal/cli","Output":"FAIL\tmcp-local-hub/internal/cli [build failed]\n","OutputType":"frame"}
+{"Time":"2026-11-28T15:14:52.5075979+03:00","Action":"fail","Package":"mcp-local-hub/internal/cli","Elapsed":0,"FailedBuild":"mcp-local-hub/internal/cli [mcp-local-hub/internal/cli.test]"}

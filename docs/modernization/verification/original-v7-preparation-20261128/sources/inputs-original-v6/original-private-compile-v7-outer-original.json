@@ -1,0 +1,14 @@
+{
+    "schema":  "original-private-compile-original-parent-v7",
+    "plan_sha256":  "6d6cb0233685566894d4e5ef426dedc07daa13948dfeeab2a446064af79382eb",
+    "same_process_start_object":  true,
+    "original_pid":  366424,
+    "exit_code":  0,
+    "wait_returned":  true,
+    "original_process_object_disposed":  true,
+    "new_job_or_tree_wait":  false,
+    "create_no_window":  true,
+    "wait_errors":  [
+
+                    ]
+}

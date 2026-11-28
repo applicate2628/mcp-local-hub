@@ -1,0 +1,387 @@
+//go:build windows && amd64
+
+package canonicalcaseowner
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"syscall"
+	"time"
+	"unsafe"
+
+	"golang.org/x/sys/windows"
+)
+
+const (
+	debugProcessFlag      = 0x00000001
+	exceptionEvent        = 1
+	createThreadEvent     = 2
+	createProcessEvent    = 3
+	exitThreadEvent       = 4
+	exitProcessEvent      = 5
+	loadDLLEvent          = 6
+	unloadDLLEvent        = 7
+	outputStringEvent     = 8
+	ripEvent              = 9
+	debugContinue         = 0x00010002
+	exceptionNotHandled   = 0x80010001
+	breakpointException   = 0x80000003
+	fileIDInfoClass       = 18
+	maximumImageBytes     = 64 << 20
+	maximumEvents         = 16384
+	maximumThreadHandles  = 4096 // bounded cumulative tool threads; originals remain retained
+	maximumProcessHandles = 256
+	abortExitCode         = 87
+)
+
+// Exact installed AMD64 DEBUG_EVENT ABI; no raw handle is serialized.
+type debugEvent struct {
+	code    uint32
+	pid     uint32
+	tid     uint32
+	padding uint32
+	data    [20]uint64
+}
+
+type fileIDInfo struct {
+	volume uint64
+	id     [16]byte
+}
+
+type ImageEvidence struct {
+	Path      string
+	FileID    string
+	SHA256    string
+	Bytes     uint64
+	Machine   uint16
+	Subsystem uint16
+}
+
+type imagePin struct {
+	handle         windows.Handle
+	evidence       ImageEvidence
+	closeAttempted bool
+	closeErr       error
+}
+
+var kernel = windows.NewLazySystemDLL("kernel32.dll")
+var waitDebugEvent = kernel.NewProc("WaitForDebugEventEx")
+var continueDebugEvent = kernel.NewProc("ContinueDebugEvent")
+var killDebuggeesOnExit = kernel.NewProc("DebugSetProcessKillOnExit")
+var isProcessInJob = kernel.NewProc("IsProcessInJob")
+
+func resolveNativeAPI() error {
+	var event debugEvent
+	if unsafe.Sizeof(event) != 176 || unsafe.Alignof(event) != 8 || unsafe.Offsetof(event.data) != 16 {
+		return errors.New("unexpected Windows amd64 DEBUG_EVENT ABI")
+	}
+	if unsafe.Sizeof(fileIDInfo{}) != 24 {
+		return errors.New("unexpected FILE_ID_INFO ABI")
+	}
+	for _, proc := range []*windows.LazyProc{waitDebugEvent, continueDebugEvent, killDebuggeesOnExit, isProcessInJob} {
+		if err := proc.Find(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func nativeError(err error) error {
+	if err == nil || err == syscall.Errno(0) {
+		return syscall.EINVAL
+	}
+	return err
+}
+
+func inAnyJob(handle windows.Handle) (bool, error) {
+	var result int32
+	ok, _, err := isProcessInJob.Call(uintptr(handle), 0, uintptr(unsafe.Pointer(&result)))
+	if ok == 0 {
+		return false, nativeError(err)
+	}
+	return result != 0, nil
+}
+
+func armKillOnExit() error {
+	ok, _, err := killDebuggeesOnExit.Call(1)
+	if ok == 0 {
+		return nativeError(err)
+	}
+	return nil
+}
+
+func nextDebugEvent(event *debugEvent, milliseconds uint32) (bool, error) {
+	ok, _, err := waitDebugEvent.Call(uintptr(unsafe.Pointer(event)), uintptr(milliseconds))
+	if ok != 0 {
+		return true, nil
+	}
+	if errors.Is(err, windows.ERROR_SEM_TIMEOUT) {
+		return false, nil
+	}
+	return false, nativeError(err)
+}
+
+func continueEvent(event *debugEvent, status uint32) error {
+	ok, _, err := continueDebugEvent.Call(uintptr(event.pid), uintptr(event.tid), uintptr(status))
+	if ok == 0 {
+		return nativeError(err)
+	}
+	return nil
+}
+
+func duplicateProcess(original windows.Handle) (windows.Handle, error) {
+	var duplicate windows.Handle
+	// A successful explicit request establishes this duplicate's rights.
+	// The event handle's access mask is never presumed to be ALL_ACCESS.
+	rights := uint32(windows.SYNCHRONIZE | windows.PROCESS_QUERY_LIMITED_INFORMATION | windows.PROCESS_TERMINATE)
+	err := windows.DuplicateHandle(windows.CurrentProcess(), original, windows.CurrentProcess(),
+		&duplicate, rights, false, 0)
+	return duplicate, err
+}
+
+func duplicateThread(original windows.Handle) (windows.Handle, error) {
+	var duplicate windows.Handle
+	err := windows.DuplicateHandle(windows.CurrentProcess(), original, windows.CurrentProcess(),
+		&duplicate, windows.SYNCHRONIZE, false, 0)
+	return duplicate, err
+}
+
+func processIdentity(handle windows.Handle) (uint32, uint64, error) {
+	pid, err := windows.GetProcessId(handle)
+	if err != nil || pid == 0 {
+		return 0, 0, errors.Join(errors.New("original process PID unavailable"), err)
+	}
+	var birth, exit, kernelTime, userTime windows.Filetime
+	if err := windows.GetProcessTimes(handle, &birth, &exit, &kernelTime, &userTime); err != nil {
+		return 0, 0, err
+	}
+	value := uint64(birth.HighDateTime)<<32 | uint64(birth.LowDateTime)
+	if value == 0 {
+		return 0, 0, errors.New("original process birth is zero")
+	}
+	return pid, value, nil
+}
+
+func checkedLocalPath(path string) error {
+	if !strings.EqualFold(filepath.VolumeName(path), "D:") {
+		return errors.New("actor image, cwd and case TEMP must be local D paths")
+	}
+	return checkedImagePath(path)
+}
+
+func checkedImagePath(path string) error {
+	volume := filepath.VolumeName(path)
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path || len(volume) != 2 || volume[1] != ':' ||
+		strings.ContainsAny(path, "\x00\r\n") || strings.ContainsAny(path[len(volume):], "/:") {
+		return errors.New("fixed input must be a clean absolute ordinary local-drive path")
+	}
+	for _, component := range strings.Split(path[len(volume)+1:], `\`) {
+		if component == "" || strings.HasSuffix(component, ".") || strings.HasSuffix(component, " ") {
+			return errors.New("ambiguous ordinary path component refused")
+		}
+	}
+	for current := path; ; current = filepath.Dir(current) {
+		encoded, err := windows.UTF16PtrFromString(current)
+		if err != nil {
+			return err
+		}
+		attributes, err := windows.GetFileAttributes(encoded)
+		if err != nil {
+			return err
+		}
+		if attributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+			return errors.New("reparse path refused: " + current)
+		}
+		if filepath.Dir(current) == current {
+			break
+		}
+	}
+	return nil
+}
+
+// Inputs have already passed ordinary absolute-path validation. The final
+// event path is obtained from the original image handle, never PID/path reopen.
+func pathWithin(root, path string) bool {
+	prefix := filepath.Clean(root) + string(os.PathSeparator)
+	return len(path) > len(prefix) && strings.EqualFold(path[:len(prefix)], prefix)
+}
+
+func canonicalProductCopyPath(root, path string) bool {
+	if !pathWithin(root, path) || filepath.Clean(path) != path {
+		return false
+	}
+	relative, err := filepath.Rel(root, path)
+	if err != nil || filepath.IsAbs(relative) {
+		return false
+	}
+	parts := strings.Split(relative, string(os.PathSeparator))
+	if len(parts) < 4 {
+		return false
+	}
+	for _, part := range parts {
+		if part == "" || part == "." || part == ".." || strings.ContainsAny(part, "/:") ||
+			strings.HasSuffix(part, ".") || strings.HasSuffix(part, " ") {
+			return false
+		}
+	}
+	end := len(parts)
+	return strings.EqualFold(parts[end-3], "product") &&
+		strings.EqualFold(parts[end-2], "mcphub-product") && strings.EqualFold(parts[end-1], "mcphub.exe")
+}
+
+func openImagePin(path string) (*imagePin, error) {
+	pin := &imagePin{}
+	encoded, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return pin, err
+	}
+	pin.handle, err = windows.CreateFile(encoded, windows.GENERIC_READ, windows.FILE_SHARE_READ, nil,
+		windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
+	if err != nil {
+		pin.handle = 0
+	}
+	return pin, err
+}
+
+func fileIdentity(handle windows.Handle) (string, uint64, error) {
+	kind, err := windows.GetFileType(handle)
+	if err != nil || kind != windows.FILE_TYPE_DISK {
+		return "", 0, errors.Join(errors.New("actual image is not a disk file"), err)
+	}
+	var identity fileIDInfo
+	if err := windows.GetFileInformationByHandleEx(handle, fileIDInfoClass,
+		(*byte)(unsafe.Pointer(&identity)), uint32(unsafe.Sizeof(identity))); err != nil {
+		return "", 0, err
+	}
+	var info windows.ByHandleFileInformation
+	if err := windows.GetFileInformationByHandle(handle, &info); err != nil {
+		return "", 0, err
+	}
+	if info.FileAttributes&(windows.FILE_ATTRIBUTE_DIRECTORY|windows.FILE_ATTRIBUTE_REPARSE_POINT) != 0 {
+		return "", 0, errors.New("actual image is a directory or reparse point")
+	}
+	size := uint64(info.FileSizeHigh)<<32 | uint64(info.FileSizeLow)
+	return fmt.Sprintf("%016x:%x", identity.volume, identity.id), size, nil
+}
+
+func observeImage(ctx context.Context, deadline time.Time, handle windows.Handle) (ImageEvidence, error) {
+	var result ImageEvidence
+	identity, size, err := fileIdentity(handle)
+	if err != nil || size == 0 || size > maximumImageBytes {
+		return result, errors.Join(errors.New("actual image identity/size refused"), err)
+	}
+	pathBuffer := make([]uint16, 32768)
+	count, err := windows.GetFinalPathNameByHandle(handle, &pathBuffer[0], uint32(len(pathBuffer)), 0)
+	if err != nil || count == 0 || count >= uint32(len(pathBuffer)) {
+		return result, errors.Join(errors.New("actual final image path unavailable"), err)
+	}
+	actualPath := strings.TrimPrefix(windows.UTF16ToString(pathBuffer[:count]), "\\\\?\\")
+	if _, err := windows.SetFilePointer(handle, 0, nil, windows.FILE_BEGIN); err != nil {
+		return result, err
+	}
+	digest := sha256.New()
+	var block [32768]byte
+	var header [4096]byte
+	copied := 0
+	var total uint64
+	for {
+		if err := ctx.Err(); err != nil {
+			return result, err
+		}
+		if !time.Now().Before(deadline) {
+			return result, context.DeadlineExceeded
+		}
+		var n uint32
+		err := windows.ReadFile(handle, block[:], &n, nil)
+		if err != nil && !errors.Is(err, windows.ERROR_HANDLE_EOF) {
+			return result, err
+		}
+		if n > 0 {
+			total += uint64(n)
+			if total > size || total > maximumImageBytes {
+				return result, errors.New("actual image grew beyond pinned bound")
+			}
+			_, _ = digest.Write(block[:n])
+			if copied < len(header) {
+				copied += copy(header[copied:], block[:n])
+			}
+		}
+		if n == 0 || errors.Is(err, windows.ERROR_HANDLE_EOF) {
+			break
+		}
+	}
+	afterID, afterSize, err := fileIdentity(handle)
+	if err != nil || total != size || afterSize != size || afterID != identity {
+		return result, errors.Join(errors.New("actual image changed during receiving"), err)
+	}
+	if copied < 64 || string(header[:2]) != "MZ" {
+		return result, errors.New("fixed image lacks DOS header")
+	}
+	pe := uint64(binary.LittleEndian.Uint32(header[0x3c:0x40]))
+	if pe+94 > uint64(copied) || string(header[pe:pe+4]) != "PE\x00\x00" {
+		return result, errors.New("fixed image PE header is outside the bounded header")
+	}
+	machine := binary.LittleEndian.Uint16(header[pe+4 : pe+6])
+	magic := binary.LittleEndian.Uint16(header[pe+24 : pe+26])
+	subsystem := binary.LittleEndian.Uint16(header[pe+24+68 : pe+24+70])
+	if machine != 0x8664 || magic != 0x20b || (subsystem != 2 && subsystem != 3) {
+		return result, errors.New("fixed image must be actual Windows amd64 GUI or CUI PE")
+	}
+	result = ImageEvidence{actualPath, identity, hex.EncodeToString(digest.Sum(nil)), size, machine, subsystem}
+	return result, nil
+}
+
+func (pin *imagePin) close() error {
+	if pin == nil || pin.handle == 0 {
+		return nil
+	}
+	if !pin.closeAttempted {
+		pin.closeAttempted = true
+		pin.closeErr = windows.CloseHandle(pin.handle)
+	}
+	return pin.closeErr
+}
+
+func pollSignal(handle windows.Handle) (bool, error) {
+	result, err := windows.WaitForSingleObject(handle, 0)
+	if err != nil {
+		return false, err
+	}
+	if result == windows.WAIT_OBJECT_0 {
+		return true, nil
+	}
+	if result == uint32(windows.WAIT_TIMEOUT) {
+		return false, nil
+	}
+	return false, fmt.Errorf("unexpected original wait result %#x", result)
+}
+
+func waitSignalUntil(handle windows.Handle, end time.Time) error {
+	for {
+		remaining := time.Until(end)
+		if remaining <= 0 {
+			return context.DeadlineExceeded
+		}
+		milliseconds := uint32(20)
+		if remaining < 20*time.Millisecond {
+			milliseconds = uint32((remaining + time.Millisecond - 1) / time.Millisecond)
+		}
+		state, err := windows.WaitForSingleObject(handle, milliseconds)
+		if err != nil {
+			return err
+		}
+		if state == windows.WAIT_OBJECT_0 {
+			return nil
+		}
+		if state != uint32(windows.WAIT_TIMEOUT) {
+			return fmt.Errorf("unexpected original wait result %#x", state)
+		}
+	}
+}

@@ -1,0 +1,22 @@
+diff --git a/internal/cli/migrate_serena_test.go b/internal/cli/migrate_serena_test.go
+index d4f46b748bdd3c6cb2a865e2c4327dd9c60ba463..65125425358b2377ebd59f92c83818ecb93faf21 100644
+--- a/internal/cli/migrate_serena_test.go
++++ b/internal/cli/migrate_serena_test.go
+@@ -399,7 +399,7 @@
+ command: go
+ base_args:
+   - --from
+-  - git+https://example/serena
++  - git+https://github.com/oraios/serena@5e4f5cd173c7ff3eed37ee3f1de6c266b937c5dc
+   - serena
+   - start-mcp-server
+   - --transport
+@@ -426,7 +426,7 @@
+ command: go
+ base_args:
+   - --from
+-  - git+https://example/serena
++  - git+https://github.com/oraios/serena@5e4f5cd173c7ff3eed37ee3f1de6c266b937c5dc
+   - serena
+ daemon_template:
+   context: codex

@@ -1636,7 +1636,7 @@ func TestAuditLockACKReplayRaceNeverCreatesANewOccurrence(t *testing.T) {
 				t.Fatalf("race %d returned invalid replay %+v", i, replay)
 			}
 		} else if replayErr.code != "RECOVER_BASELINE_STALE" {
-			t.Fatalf("race %d replay err=%v", i, replayErr)
+			t.Fatalf("race %d replay err=%v; cause=%v", i, replayErr, replayErr.cause)
 		}
 	}
 }

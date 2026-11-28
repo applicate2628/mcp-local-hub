@@ -1,0 +1,13 @@
+diff --git a/internal/api/port_pid_probe_test.go b/internal/api/port_pid_probe_test.go
+index 1c0e0aa..b205905 100644
+--- a/internal/api/port_pid_probe_test.go
++++ b/internal/api/port_pid_probe_test.go
+@@ -176,7 +176,7 @@ func TestPortProbeTestHelperAdmission(t *testing.T) {
+ 					"MCPHUB_TEST_READY_PATH="+filepath.Join(dir, "ready"),
+ 					"MCPHUB_TEST_RELEASE_PATH="+release)
+ 			}
+-			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
++			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+ 			defer cancel()
+ 			cmd := exec.CommandContext(ctx, childImage, tc.args...)
+ 			process.NoConsole(cmd)

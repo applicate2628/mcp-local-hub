@@ -1,0 +1,35 @@
+diff --git a/internal/api/supervisor_intent_lock_ownership_test.go b/internal/api/supervisor_intent_lock_ownership_test.go
+index e92c446..4c92ecb 100644
+--- a/internal/api/supervisor_intent_lock_ownership_test.go
++++ b/internal/api/supervisor_intent_lock_ownership_test.go
+@@ -41,9 +41,13 @@ var reviewedRawFlockOwners = map[string]int{
+ 	"internal/api/mcp_front_routing_target.go:func:withMCPFrontRoutingFileLease":                     1,
+ 	"internal/api/state_file_helper.go:func:WriteStateFileBytesAtomic":                               1,
+ 	"internal/api/state_file_observed_lease.go:func:acquireLedgeredObservedLeaf":                     1,
++	"internal/api/state_file_observed_lease.go:func:tryAcquireLedgeredObservedLeaf":                  1,
+ 	"internal/api/supervisor_events.go:func:OpenSupervisorEventLog":                                  1,
+ 	"internal/api/supervisor_lock.go:func:AcquireSupervisorLock":                                     1,
+ 	"internal/api/supervisor_lock.go:func:AcquireSupervisorLockQuiet":                                1,
++	"internal/api/supervisor_lock.go:func:AcquireSupervisorLockQuietObserved":                        1,
++	"internal/api/supervisor_lock.go:func:ObserveOccupiedSupervisorLockOwner":                        1,
++	"internal/api/supervisor_lock.go:func:ReadOccupiedSupervisorLockOwner/func-lit#1":                1,
+ 	"internal/api/supervisor_lock.go:func:SupervisorRunningUnderStateDir/func-lit#1":                 1,
+ 	"internal/api/supervisor_state.go:func:MutateSupervisorStateIfChangedContext":                    1,
+ 	"internal/api/supervisor_state.go:func:WithEmptyStopSettlementFence":                             1,
+@@ -459,11 +463,15 @@ func compareOwnerInventory(got, want map[string]int) error {
+ 		ordered = append(ordered, key)
+ 	}
+ 	sort.Strings(ordered)
++	var differences []string
+ 	for _, key := range ordered {
+ 		if got[key] != want[key] {
+-			return fmt.Errorf("owned call %s calls=%d, reviewed=%d", key, got[key], want[key])
++			differences = append(differences, fmt.Sprintf("owned call %s calls=%d, reviewed=%d", key, got[key], want[key]))
+ 		}
+ 	}
++	if len(differences) != 0 {
++		return fmt.Errorf("%s", strings.Join(differences, "\n"))
++	}
+ 	return nil
+ }
+ 

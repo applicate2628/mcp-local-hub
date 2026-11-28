@@ -1,0 +1,6 @@
+tree 645ddcd88647b8c628ec966f037762886bd56b31
+parent afdf474930da60080e9aa132a3a373fcf2009bab
+author applicate2628 <dima_den@inbox.ru> 1795623745 +0300
+committer applicate2628 <dima_den@inbox.ru> 1795623745 +0300
+
+test(serena): align fixture contexts and observed lease arity

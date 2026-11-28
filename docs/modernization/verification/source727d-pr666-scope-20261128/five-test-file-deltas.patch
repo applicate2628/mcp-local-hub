@@ -1,0 +1,124 @@
+diff --git a/internal/cli/supervise_test.go b/internal/cli/supervise_test.go
+index 7885008429d09bdd0fbd74583b35a67eddf1f8c4..c1985ab57bf2a5347547187730aef80d847fa139 100644
+--- a/internal/cli/supervise_test.go
++++ b/internal/cli/supervise_test.go
+@@ -716,6 +716,10 @@
+ // and intent_files_loaded is the observability companion (operators
+ // debugging a stuck startup can see which sub-step is incomplete).
+ func TestSuperviseCommand_StatusIPC_ReconcileReady(t *testing.T) {
++	// Match the route-seeder fixtures: this Go test binary is not a qualified
++	// Product image, while the IPC contract still requires the seeded row.
++	t.Cleanup(api.SetTestCanonicalMcphubPath(canonicalMcphubPath()))
++
+ 	// v0.5.0 Fix Group 5: supervisor.lock owner sidecar +
+ 	// supervisor-state.json writes flow through the hardened
+ 	// secure-write pipeline. The state-dir override target must
+diff --git a/internal/cli/upgrade_gui_fence_windows_test.go b/internal/cli/upgrade_gui_fence_windows_test.go
+index 638ccc42dfbff11c7c9c711720388525f7b2f900..5cce7e8804e16806575ba950eca551a6ee5d9836 100644
+--- a/internal/cli/upgrade_gui_fence_windows_test.go
++++ b/internal/cli/upgrade_gui_fence_windows_test.go
+@@ -142,7 +142,7 @@
+ 				return nil
+ 			}
+ 		}
+-		f.txn = &WindowsProductTxn{Opts: WindowsProductTxnOpts{JournalAllowance: productJournalFixtureAllowance(), Context: productJournalFixtureContext(), StateDir: req.StateDir, ProductPath: req.ProductPath, LegacyWindowlessPath: req.LegacyWindowlessPath, StagedProduct: req.StagedProduct, Mode: req.Mode, Tasks: f.tasks, Deps: deps}}
++		f.txn = &WindowsProductTxn{Opts: WindowsProductTxnOpts{StateDir: req.StateDir, ProductPath: req.ProductPath, LegacyWindowlessPath: req.LegacyWindowlessPath, StagedProduct: req.StagedProduct, Mode: req.Mode, Tasks: f.tasks, Deps: deps}}
+ 		return f.txn, nil
+ 	}
+ 	return f
+@@ -691,7 +691,7 @@
+ 			job.queryErr = os.ErrPermission
+ 		}, wantGUI: 1, wantTray: 1, wantJob: 1, wantID: "UPGRADE_GUI_SUPERVISOR_INDEPENDENCE_UNPROVEN"},
+ 		{name: "failure after GUI hold", mutate: func(in *upgradeGUIObservationInputs, _, _ *upgradeGUIAuthorityHold, _ *upgradeGUIAuthorityJobHold, _ string, _ time.Time) {
+-			in.ListProcesses = func(context.Context, []string) ([]api.ProcessInfo, error) { return nil, os.ErrPermission }
++			in.ListProcesses = func([]string) ([]api.ProcessInfo, error) { return nil, os.ErrPermission }
+ 		}, wantGUI: 1, wantID: "UPGRADE_GUI_IDENTITY_AMBIGUOUS"},
+ 		{name: "failure after tray hold", mutate: func(in *upgradeGUIObservationInputs, _, _ *upgradeGUIAuthorityHold, _ *upgradeGUIAuthorityJobHold, _ string, _ time.Time) {
+ 			in.ParentPID = func(int) (int, error) { return 0, os.ErrPermission }
+@@ -724,8 +724,8 @@
+ 				OwnerPath:        func() (string, error) { return ownerPath, nil },
+ 				VerifyListener:   func(context.Context, string, int, int) error { return nil },
+ 				ProbeLeaseUnheld: func(string) (bool, error) { return false, nil },
+-				FindGUIs:         func(context.Context, string) ([]api.ProcessInfo, error) { return []api.ProcessInfo{{PID: 101}}, nil },
+-				ListProcesses: func(context.Context, []string) ([]api.ProcessInfo, error) {
++				FindGUIs:         func(string) ([]api.ProcessInfo, error) { return []api.ProcessInfo{{PID: 101}}, nil },
++				ListProcesses: func([]string) ([]api.ProcessInfo, error) {
+ 					return []api.ProcessInfo{{PID: 102, Cmdline: target + " tray"}}, nil
+ 				},
+ 				HoldTermination: func(pid int) (process.HeldPIDGeneration, error) {
+@@ -970,7 +970,7 @@
+ 
+ func TestUpgradeGUIOwnedPairPreparePersistsLivePreimage(t *testing.T) {
+ 	f := newUpgradeGUICommandC3Fixture(t)
+-	txn, err := newWindowsProductTxnFn(windowsProductTxnRequest{JournalAllowance: productJournalFixtureAllowance(),
++	txn, err := newWindowsProductTxnFn(windowsProductTxnRequest{
+ 		Context: context.Background(), StateDir: f.stateDir, ProductPath: f.target,
+ 		LegacyWindowlessPath: filepath.Join(filepath.Dir(f.target), "mcphub-windowless.exe"),
+ 		StagedProduct:        f.candidate, Mode: WindowsProductPairModeUpgrade,
+@@ -1726,7 +1726,7 @@
+ 	}
+ 	f.journal.Quiescence, f.journal.QuiescenceReceiptSHA256, f.journal.PriorFleetReaped = &projection, digest, true
+ 	journalPath := filepath.Join(f.stateDir, WindowsProductRecoveryFileLeafV3)
+-	if err := persistWindowsProductRecoveryJournalV3(productJournalFixtureContext(), productJournalFixtureAllowance(), journalPath, f.journal, api.WriteStateFileBytesAtomic, api.ReadStateFileInodeAnchored); err != nil {
++	if err := persistWindowsProductRecoveryJournalV3(journalPath, f.journal, api.WriteStateFileBytesAtomic, api.ReadStateFileInodeAnchored); err != nil {
+ 		t.Fatal(err)
+ 	}
+ 	tasks := &recoveryTaskTxnFake{digest: f.journal.TaskSetSHA256}
+diff --git a/internal/cli/upgrade_gui_qualified_fixture_windows_test.go b/internal/cli/upgrade_gui_qualified_fixture_windows_test.go
+index 647c9568e0a5d8a82cff0ba60316cadfd5079259..dcdac5b9138b1d12a32100620030abd127c1fd72 100644
+--- a/internal/cli/upgrade_gui_qualified_fixture_windows_test.go
++++ b/internal/cli/upgrade_gui_qualified_fixture_windows_test.go
+@@ -74,7 +74,15 @@
+ 	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+ 		t.Fatalf("fixture input must be one JSON object: %v", err)
+ 	}
+-	input := f.Input
++	return receiveWindowsCanonicalEntryFixture(t, f.Input)
++}
++
++// Shared receiving keeps the original build binding, public observer, exact
++// artifact hashes and native file acquisition identical for both fixture roles.
++func receiveWindowsCanonicalEntryFixture(t *testing.T, input windowsCanonicalEntryFixtureInput) *windowsCanonicalEntryFixture {
++	t.Helper()
++	f := &windowsCanonicalEntryFixture{Input: input}
++	var err error
+ 	testProduct, testProductSet := os.LookupEnv("MCPHUB_CANONICAL_FIXTURE_TEST_PRODUCT")
+ 	if testProductSet && testProduct != "1" {
+ 		t.Fatal("MCPHUB_CANONICAL_FIXTURE_TEST_PRODUCT must be 1 when supplied")
+@@ -218,7 +226,7 @@
+ 				return nil
+ 			}
+ 		}
+-		f.txn = &WindowsProductTxn{Opts: WindowsProductTxnOpts{JournalAllowance: productJournalFixtureAllowance(),
++		f.txn = &WindowsProductTxn{Opts: WindowsProductTxnOpts{
+ 			Context: req.Context, StateDir: req.StateDir, ProductPath: req.ProductPath,
+ 			CanonicalEntryPath: req.CanonicalEntryPath, IdentityPath: req.IdentityPath, EntrySet: req.EntrySet,
+ 			LegacyWindowlessPath: req.LegacyWindowlessPath, StagedProduct: req.StagedProduct,
+diff --git a/internal/cli/supervise_reconcile_ipc_test.go b/internal/cli/supervise_reconcile_ipc_test.go
+index 82fcacfd60f4d51cc1efd094e391601b8a2107ce..899ee7e2d2b5f2cb6d9ed2e2cd1c37df853580da 100644
+--- a/internal/cli/supervise_reconcile_ipc_test.go
++++ b/internal/cli/supervise_reconcile_ipc_test.go
+@@ -187,6 +187,10 @@
+ 
+ func newReconcileTestFixtureWithStateDir(t *testing.T, intent *api.SupervisorIntentFile, tmpHome string) *reconcileTestFixture {
+ 	t.Helper()
++	// These fixtures observe only their declared descriptors. Builtin-route
++	// seeding has separate production-path coverage and is explicitly enabled
++	// by the lock-skip cases that need to prove it is bypassed.
++	t.Cleanup(setBuiltinRouteSeedingDisabledForTest())
+ 	if tmpHome == "" {
+ 		tmpHome = apitest.HardenedTempDir(t)
+ 	}
+diff --git a/internal/cli/workspace_cmd_test.go b/internal/cli/workspace_cmd_test.go
+index a5c940ea6683d140ade80e72c3ceb5535990c27f..7f1a27cf92e7866205813ee350a64a90e0615101 100644
+--- a/internal/cli/workspace_cmd_test.go
++++ b/internal/cli/workspace_cmd_test.go
+@@ -2092,7 +2092,7 @@
+ 	}
+ 	t.Cleanup(func() { serenaRegisterReconcileFn = previousReconcile })
+ 	workspace := makeWorkspaceDir(t, fx.deps.stateDir, []string{"python"})
+-	if _, err = runWorkspaceCmd(t, "register", workspace, "--backend", "serena"); err != nil {
++	if _, err = runWorkspaceCmd(t, "register", workspace); err != nil {
+ 		t.Fatalf("original workspace producer: %v", err)
+ 	}
+ 	if len(responses) != 1 || responses[0].SerenaOrphansRepaired != 1 {

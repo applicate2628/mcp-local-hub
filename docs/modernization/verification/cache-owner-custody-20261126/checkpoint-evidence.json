@@ -1,0 +1,1103 @@
+{
+  "schema": "cache-continuation-checkpoint-evidence-20261126-v1",
+  "artifact_kind": "Derived human-review projection; original receipts remain authoritative",
+  "scope": "Recovered private ACA full-v10 evidence plus narrow public API/CLI test-port candidates; separate from the concurrent 25 November multi-PR audit",
+  "review_status": "INTERNAL_REVIEW_COMPLETE_FULL_GATE_FAIL_EXTERNAL_REVIEW_PENDING",
+  "public_heads_at_recovery": {
+    "637": {
+      "head": "fix/serena-integration-qualification-20261114",
+      "head_sha": "123858ef8292aceb86d8ca7ef71d4e4dea1fec91",
+      "base": "fix/serena-qualification-home-20261114",
+      "base_sha": "a4274b4e6902c508a0a99a86b9c7c7bd1bad8d7c",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "updated_at": "2026-11-25T17:27:52Z"
+    },
+    "664": {
+      "head": "fix/p0-test-entry-preserve-20261121",
+      "head_sha": "62199b68b2fc59095edacfe47d6990d48accbb2f",
+      "base": "perf/rx16-native-observation-20261112",
+      "base_sha": "e7fee02b5ce1b965486b15f13938bd0d67c841d8",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "updated_at": "2026-11-25T00:47:20Z"
+    },
+    "665": {
+      "head": "fix/api-test-helper-dispatch-20261121",
+      "head_sha": "1b6395657f1b88d3fe7de3a792473abdeb82b29d",
+      "base": "fix/p0-test-entry-preserve-20261121",
+      "base_sha": "b884b1ea90edd041204bc15ac6c9f0f3fb8b6da0",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "updated_at": "2026-11-24T12:55:58Z"
+    },
+    "666": {
+      "head": "fix/cli-test-helper-dispatch-20261121",
+      "head_sha": "e67472f606eac43efaf9aa0aab28d1994e73a7b2",
+      "base": "fix/p0-test-entry-preserve-20261121",
+      "base_sha": "b884b1ea90edd041204bc15ac6c9f0f3fb8b6da0",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "updated_at": "2026-11-24T12:56:02Z"
+    }
+  },
+  "test_source": {
+    "schema": "reviewed-product-test-source-compatibility-v1",
+    "product_source_commit": "3ebe335a2f666a5279d7fafc31a6f4dc3feedff4",
+    "test_source_commit": "aca81a1743ccfbf3e10902769a9b071eb911919e",
+    "source_file_count": 3508,
+    "changed_paths": [
+      "internal/api/adopt_codex_transport_test.go",
+      "internal/api/adopt_deadopt_lifecycle_test.go",
+      "internal/api/adopt_h4_summary_signal_test.go",
+      "internal/api/adopt_lease_namespace_windows_test.go",
+      "internal/api/adopt_lease_owner_test.go",
+      "internal/api/adopt_mcpcompat_test.go",
+      "internal/api/adopt_project_plan_test.go",
+      "internal/api/adopt_test.go",
+      "internal/cli/adopt_mcpcompat_test.go",
+      "internal/cli/adopt_test.go",
+      "internal/cli/gui_force_test.go"
+    ],
+    "changed_file_count": 11,
+    "unchanged_path_count": 3497,
+    "unchanged_non_test_paths": true,
+    "unchanged_non_test_path_count": 2012
+  },
+  "native_qualifications": {
+    "owner14": {
+      "root": {
+        "sha256": "87fe6b959cc726b6116080ef0eca863d8d6f415f362123d8dbe65c9765da3747",
+        "bytes": 1229
+      },
+      "cases": {
+        "sha256": "956e537fe69e7d710028630ab1bb07e7e52572b9344cdb2f2b1d221dae6ba92e",
+        "bytes": 4673
+      },
+      "status": "PASS",
+      "case_count": 14,
+      "case_results": [
+        {
+          "case": "native-ordinary-stdin",
+          "status": "PASS"
+        },
+        {
+          "case": "native-go-metadata",
+          "status": "PASS"
+        },
+        {
+          "case": "metadata-normal",
+          "status": "PASS"
+        },
+        {
+          "case": "metadata-first-join",
+          "status": "PASS"
+        },
+        {
+          "case": "metadata-overflow",
+          "status": "PASS"
+        },
+        {
+          "case": "safe-pass-replay",
+          "status": "PASS"
+        },
+        {
+          "case": "safe-fail-replay",
+          "status": "PASS"
+        },
+        {
+          "case": "client-death",
+          "status": "PASS"
+        },
+        {
+          "case": "client-timeout",
+          "status": "PASS"
+        },
+        {
+          "case": "request-negatives",
+          "status": "PASS"
+        },
+        {
+          "case": "start-failure",
+          "status": "PASS"
+        },
+        {
+          "case": "finalization-failure",
+          "status": "PASS"
+        },
+        {
+          "case": "failed-receipt-save",
+          "status": "PASS"
+        },
+        {
+          "case": "invocation-deadline",
+          "status": "PASS"
+        }
+      ],
+      "scope": "actual new guard/RootInvocation/broker; synthetic tool output; installed Go metadata read-only",
+      "controller_exit_code": 0,
+      "original_controller_reaped": true,
+      "original_captures_closed": true,
+      "seconds": 5.8465998000174295,
+      "inputs": {
+        "guard-custody.py": "56d6ccee190472cbdacd5f0ec5f7636df3487f27ec208e0776c20c12a22b72f2",
+        "literal_go_exec_adapter_ready_v1.py": "e9ad8ea12d6e87833c8d5f347602a352e0a1733e8bf8ba83a9d6a3b36828403f",
+        "run_literal_go_gate_ready_v1.py": "1af0f9e564f876d1d1ae879ad1b11dc7875287be181413376e2f32bdd155f551",
+        "qualified_windows_products_consumer_v1.py": "87fafb9ed3b2f17f36b2829b41cc3a38a102198132dde04768131fc91491d6e1",
+        "qualify_owner_custody_local.py": "199c9183bb080565155f60003eed9f6ad4ee0a32c32c38c74ed8ed7746a87691"
+      },
+      "full_regression_executed": false,
+      "consumer_timeout_probe": "deterministic consumer-only monotonic expiry injection; not measured real355s latency",
+      "old_unknown_reclassified": false,
+      "security_boundary": "Cooperating same-account components; nonce/hashes bind the request to accepted inputs, not authentication against a malicious same-account writer.",
+      "go_unknown_recovery_not_proven": "Earlier Go helper UNKNOWN retention is bounded by the lifetime of the original Go controller process; these Python owner/broker cases do not prove recovery after that controller exits."
+    },
+    "runtime_v13": {
+      "root": {
+        "sha256": "bca138548ff08ad9fa15736ef5fb71fc25c45084d3a12262aa2dae7a1219d856",
+        "bytes": 1270
+      },
+      "cases": {
+        "sha256": "e18d3acec9fd75d2d7b6d8eb104ab6d920e12a2fb623618df4dd4b1e4dc9fa1d",
+        "bytes": 4452
+      },
+      "status": "PASS",
+      "case_count": 2,
+      "case_results": [
+        {
+          "case": "begin-registration-before-first-command",
+          "status": "PASS"
+        },
+        {
+          "case": "outer-run-finalization-retains-original-workers",
+          "status": "PASS"
+        }
+      ],
+      "scope": "full import, actual scope/source/resource DATA admission and owner-runtime loading; two synthetic original-custody failure schedules",
+      "controller_exit_code": 0,
+      "original_controller_reaped": true,
+      "original_captures_closed": true,
+      "seconds": 0.7375590000010561,
+      "inputs": {
+        "run_literal_go_gate_ready_v1.py": "43822b4ac69464505819f1c5719b844b1b1c0f0a2a702ad3accff5137aa6a450",
+        "literal_go_exec_adapter_ready_v1.py": "83b0f13017a65d4a2753d10b26c04c9e0b44f3d301ba638b5c8f4fabd0d84dba",
+        "run_partitioned_go_gate_full_v1.py": "83cb6329605039e6cee517d9a530881030f6d614ce568e03c96dad2655ea82bd",
+        "qualified_windows_products_consumer_v1.py": "a19fde2ae8ee6a79f8afff37fd669707bd4ba1258edd779bfb1fb9d201d9db69",
+        "receive_fresh_full_inputs_v1.py": "d1f22787c5241a9972289e707e620fdb06729144c87f784062e79a6d3ea8890a",
+        "private_run_scope.py": "e1796e716f457af234dfc1061c917ce7d177852da537210d76d66bbf8936949a"
+      },
+      "full_regression_executed": false,
+      "actual_scope_binding_received": true,
+      "actual_source_data_received": true,
+      "actual_retained_grant_received": true,
+      "guard_sha256": "56d6ccee190472cbdacd5f0ec5f7636df3487f27ec208e0776c20c12a22b72f2",
+      "test_source_commit": "aca81a1743ccfbf3e10902769a9b071eb911919e",
+      "retained_grant_sha256": "6a28ce3b3f245044a4dcc0e6e518139773eae59e1001e99298b84c7e9d231b18",
+      "all_original_probe_workers_joined": true
+    }
+  },
+  "full_v10": {
+    "parent": {
+      "sha256": "3812d74a5a4b9d02eabae0a05a67ba7bb3dd79a729b40d91d29e05d0fbf6e7cb",
+      "bytes": 24367
+    },
+    "receipt": {
+      "sha256": "555263b0add9ceec75e35967bc62e84c68c5e820e2e9bf5ba48be8bf551a225b",
+      "bytes": 8129880
+    },
+    "status": "FAIL",
+    "exit_code": 1,
+    "seconds": 2295.1359646999917,
+    "literal_commands": [
+      "go build ./... && go vet ./... && go test -count=1 -timeout 5m ./...",
+      "go test -tags=test_state_path_env -count=1 -timeout 5m ./internal/api/ ./internal/cli/"
+    ],
+    "commands_received": 19,
+    "ordinary_original_native_io_closed": 17,
+    "phase_settlements_received": 2,
+    "original_invocations_retained": 66,
+    "original_issuer_joined": true,
+    "original_owner_receipt_pointers": 130,
+    "closure_review_scope": "17 ordinary rows plus 2 phase/replay bindings were independently checked from the original aggregate. Four failing adapters and six owner receipts have a separate independent receiving record; the remaining 124 owner receipts were not reread by this reviewer.",
+    "commands": [
+      {
+        "name": "head-before",
+        "exit_code": 0,
+        "seconds": 0.06763070001034066,
+        "closed": true,
+        "closure_basis": "original native and I/O closed"
+      },
+      {
+        "name": "source-files-before",
+        "exit_code": 0,
+        "seconds": 0.22833139999420382,
+        "closed": true,
+        "closure_basis": "original native and I/O closed"
+      },
+      {
+        "name": "status-before",
+        "exit_code": 0,
+        "seconds": 0.4743374999961816,
+        "closed": true,
+        "closure_basis": "original native and I/O closed"
+      },
+      {
+        "name": "packages-literal-default",
+        "exit_code": 0,
+        "seconds": 31.0076124999905,
+        "closed": true,
+        "closure_basis": "original native and I/O closed"
+      },
+      {
+        "name": "packages-literal-state",
+        "exit_code": 0,
+        "seconds": 0.1872459999867715,
+        "closed": true,
+        "closure_basis": "original native and I/O closed"
+      },
+      {
+        "name": "compile-literal-contained",
+        "exit_code": 0,
+        "seconds": 99.19186479999917,
+        "closed": true,
+        "closure_basis": "original native and I/O closed"
+      },
+      {
+        "name": "compile-literal-job",
+        "exit_code": 0,
+        "seconds": 10.874924400006421,
+        "closed": true,
+        "closure_basis": "original native and I/O closed"
+      },
+      {
+        "name": "compile-literal-namespace",
+        "exit_code": 0,
+        "seconds": 9.03984319997835,
+        "closed": true,
+        "closure_basis": "original native and I/O closed"
+      },
+      {
+        "name": "compile-literal-validator",
+        "exit_code": 0,
+        "seconds": 3.9570792999875266,
+        "closed": true,
+        "closure_basis": "original native and I/O closed"
+      },
+      {
+        "name": "compile-literal-canonical",
+        "exit_code": 0,
+        "seconds": 9.312955699977465,
+        "closed": true,
+        "closure_basis": "original native and I/O closed"
+      },
+      {
+        "name": "resolve-original-test2json",
+        "exit_code": 0,
+        "seconds": 2.497368100011954,
+        "closed": true,
+        "closure_basis": "original native and I/O closed"
+      },
+      {
+        "name": "head-after-tool-preparation",
+        "exit_code": 0,
+        "seconds": 0.06873759999871254,
+        "closed": true,
+        "closure_basis": "original native and I/O closed"
+      },
+      {
+        "name": "source-files-after-tool-preparation",
+        "exit_code": 0,
+        "seconds": 0.07762820000061765,
+        "closed": true,
+        "closure_basis": "original native and I/O closed"
+      },
+      {
+        "name": "literal-build",
+        "exit_code": 0,
+        "seconds": 83.0828390000097,
+        "closed": true,
+        "closure_basis": "original native and I/O closed"
+      },
+      {
+        "name": "literal-vet",
+        "exit_code": 0,
+        "seconds": 139.27612070000032,
+        "closed": true,
+        "closure_basis": "original native and I/O closed"
+      },
+      {
+        "name": "literal-default",
+        "exit_code": 1,
+        "seconds": 1148.33,
+        "closed": true,
+        "closure_basis": "phase settlement bound to original replay and owner receipt pointers"
+      },
+      {
+        "name": "literal-state",
+        "exit_code": 1,
+        "seconds": 730.021,
+        "closed": true,
+        "closure_basis": "phase settlement bound to original replay and owner receipt pointers"
+      },
+      {
+        "name": "head-after",
+        "exit_code": 0,
+        "seconds": 0.1062814999895636,
+        "closed": true,
+        "closure_basis": "original native and I/O closed"
+      },
+      {
+        "name": "source-files-after",
+        "exit_code": 0,
+        "seconds": 0.12290620000567287,
+        "closed": true,
+        "closure_basis": "original native and I/O closed"
+      }
+    ],
+    "phases": [
+      {
+        "phase": "default",
+        "expected_started_completed_received_equal": true,
+        "count": 64,
+        "passed_adapters": 62,
+        "failed_adapters": 2,
+        "native_custody_settled": true,
+        "original_replay_binding_count": 64,
+        "raw_stream_bindings": 62,
+        "metadata_only_fail_replays": [
+          "mcp-local-hub/internal/api",
+          "mcp-local-hub/internal/cli"
+        ],
+        "nested_receipts_independently_read_in_this_review": false
+      },
+      {
+        "phase": "state",
+        "expected_started_completed_received_equal": true,
+        "count": 2,
+        "passed_adapters": 0,
+        "failed_adapters": 2,
+        "native_custody_settled": true,
+        "original_replay_binding_count": 2,
+        "raw_stream_bindings": 2,
+        "metadata_only_fail_replays": [],
+        "nested_receipts_independently_read_in_this_review": false
+      }
+    ],
+    "preserved": {
+      "source_unchanged": true,
+      "original_inputs_unchanged": true,
+      "actual_product_unchanged": true,
+      "private_migration_exports_unchanged": true
+    },
+    "aggregate_review": {
+      "sha256": "eeabb763c16bfb9f710f97e966d5fb0a841a4707084c90d2ee85af8bbd8827a2",
+      "bytes": 10268
+    },
+    "failure_scope_receiving": {
+      "sha256": "7ef88825eb92af05870e0d36285e535c858fc210fb331a76b8979a8ff4666095",
+      "scope_count": 4,
+      "commands_received": 28,
+      "native_owner_receipts_received": 6,
+      "scopes": [
+        {
+          "phase": "default",
+          "package": "mcp-local-hub/internal/api",
+          "receipt_sha256": "5af9610a2d6d8f8cde62f01122675b72c8a58c3f1f71e135856815a6df9b4bbd",
+          "commands_received": 6,
+          "native_owners_received": 1,
+          "original_replay_matches": true,
+          "status": "CLOSED_FAIL",
+          "preparation_seconds": 40.89309450000292,
+          "preparation_budget_seconds": 30,
+          "suite_started": false,
+          "adapter_exit_code": 1,
+          "error": "RuntimeError: adapter preparation exceeded its fixed budget; full suite was not started",
+          "top_level_outcomes": {}
+        },
+        {
+          "phase": "default",
+          "package": "mcp-local-hub/internal/cli",
+          "receipt_sha256": "3002aab883b49931de5282d97ecb5e2c80495efac582527a561f5f8c519a42cb",
+          "commands_received": 6,
+          "native_owners_received": 1,
+          "original_replay_matches": true,
+          "status": "CLOSED_FAIL",
+          "preparation_seconds": 48.9291685000062,
+          "preparation_budget_seconds": 30,
+          "suite_started": false,
+          "adapter_exit_code": 1,
+          "error": "RuntimeError: adapter preparation exceeded its fixed budget; full suite was not started",
+          "top_level_outcomes": {}
+        },
+        {
+          "phase": "state",
+          "package": "mcp-local-hub/internal/api",
+          "receipt_sha256": "a78fd365dc81daaafcf0d190a869fc9411a4cd137851c492cd7d3955303046b9",
+          "commands_received": 8,
+          "native_owners_received": 2,
+          "original_replay_matches": true,
+          "status": "CLOSED_FAIL",
+          "preparation_seconds": 12.103593699983321,
+          "preparation_budget_seconds": 30,
+          "suite_started": true,
+          "adapter_exit_code": 2,
+          "error": "RuntimeError: original suite, inventory ledger, image, or custody proof failed",
+          "terminal_root_counts": {
+            "PASS": 266,
+            "FAIL": 0,
+            "SKIP": 1
+          },
+          "not_completed_roots": 3262,
+          "never_started_roots": 3261,
+          "paused_without_continue_roots": 0,
+          "running_at_deadline_roots": 1,
+          "original_receiving_not_run_field_meaning": "No terminal outcome; not equivalent to never started."
+        },
+        {
+          "phase": "state",
+          "package": "mcp-local-hub/internal/cli",
+          "receipt_sha256": "fea5c6ee601794f625a6fa496a79b7d44e4d3d04fba35cbf3ac0b6ccdfeceb55",
+          "commands_received": 8,
+          "native_owners_received": 2,
+          "original_replay_matches": true,
+          "status": "CLOSED_FAIL",
+          "preparation_seconds": 18.686208600003738,
+          "preparation_budget_seconds": 30,
+          "suite_started": true,
+          "adapter_exit_code": 2,
+          "error": "RuntimeError: original suite, inventory ledger, image, or custody proof failed",
+          "terminal_root_counts": {
+            "PASS": 980,
+            "FAIL": 0,
+            "SKIP": 11
+          },
+          "not_completed_roots": 1000,
+          "never_started_roots": 985,
+          "paused_without_continue_roots": 14,
+          "running_at_deadline_roots": 1,
+          "original_receiving_not_run_field_meaning": "No terminal outcome; not equivalent to never started."
+        }
+      ]
+    },
+    "detailed_failure_analysis": {
+      "sha256": "2a934c2946e7fa644a38372d134878e60a70506261d72da6cd1eb514b12b3f88",
+      "published_path": "full-v10/failure-analysis.json",
+      "original_not_run_field_semantics": "Some earlier aggregate receiving fields named NOT_RUN count roots without terminal outcome, including started roots; use the explicit execution breakdown below."
+    }
+  },
+  "public_test_candidates": {
+    "status": "PREPARED_ON_EXACT_PUBLIC_PREIMAGES",
+    "private_patch": {
+      "sha256": "f361229184be36c3d7b7e1be106036c2a03216d4bf8506f45795d188be4a98cf",
+      "bytes": 26241
+    },
+    "private_delta_map": {
+      "sha256": "b0fb77499a3e2f5dd20a543047d65b6e0f96afc40101ec7c0ccbe143a8312234",
+      "bytes": 3723
+    },
+    "patches": [
+      {
+        "pr": 665,
+        "preimage_head": "1b6395657f1b88d3fe7de3a792473abdeb82b29d",
+        "patch": {
+          "sha256": "6d8e0b06f673ad028f12922f55a640b316f449e7c4dbfeaf822d0ca24ca72d38",
+          "bytes": 17986
+        },
+        "files_changed": 8,
+        "added": 47,
+        "removed": 46,
+        "files": [
+          {
+            "pr": 665,
+            "path": "internal/api/adopt_codex_transport_test.go",
+            "before_sha256": "203130a9449ad7c97191b514720975f5647f9fb416d3bfab340093323e8d48dd",
+            "after_sha256": "e15d9ebf574459f5d13db01d58301df9cdebffa31870bc558b97b87af560d602",
+            "git_blob_before": "ef55fd131bf051c5dad6b20723c81b563aa0ccf4",
+            "git_blob_after": "332b49f17cc30d558a0d3c59b602b3625dcd09bc",
+            "matches_private_after": true,
+            "added": 6,
+            "removed": 5
+          },
+          {
+            "pr": 665,
+            "path": "internal/api/adopt_deadopt_lifecycle_test.go",
+            "before_sha256": "15bf34d4efecb5f61ba597c0d3bc255b6d5ced6ca0ef4f843d567d16cf13d6c9",
+            "after_sha256": "f82d97abeffe51c45c2f3978937c8d679c8bef90612897a7fa25020bf05a4346",
+            "git_blob_before": "37f34d636c1d0883dd988a1c5b84aca964dce7c5",
+            "git_blob_after": "36279734c2f6be64dc81e60c2f8d0d01ed8ce68f",
+            "matches_private_after": true,
+            "added": 1,
+            "removed": 1
+          },
+          {
+            "pr": 665,
+            "path": "internal/api/adopt_h4_summary_signal_test.go",
+            "before_sha256": "976dea698f201702480ebf8e6dd24e4e926e40900d7535332eddaacb290524d6",
+            "after_sha256": "bcbb8bd9352245f1e82ee5e97796109fee492ac70f75c42a32979a1fedb146a4",
+            "git_blob_before": "ab36c0df5efa705b28cb3a52dc707c1ec8f789eb",
+            "git_blob_after": "229619d7b027df355e38e0805a3be4c7f0d9c930",
+            "matches_private_after": true,
+            "added": 8,
+            "removed": 8
+          },
+          {
+            "pr": 665,
+            "path": "internal/api/adopt_lease_namespace_windows_test.go",
+            "before_sha256": "dcc8a711f284f81fb762ff619946b9a5a041d266dc10a3e6b1516f4d657e67c2",
+            "after_sha256": "a95638abca1b51a45bf30cfcdd72f165f3fa5e2ac71d6985f468a0fcbcbd121e",
+            "git_blob_before": "bc49ccc7810e27dc97731d8a107ea072e889ac63",
+            "git_blob_after": "f3d7b2a593d093ff21c92ee8a947283ab18bb42c",
+            "matches_private_after": false,
+            "added": 11,
+            "removed": 11
+          },
+          {
+            "pr": 665,
+            "path": "internal/api/adopt_lease_owner_test.go",
+            "before_sha256": "07ed1d764cdc38d0656526885e9a2324e2409df2c6ac6d33cb0849cd6680ec37",
+            "after_sha256": "5644d51a482785bf0078df9f2bd6abcf4c7c640b7c4821543af94ad9549321a7",
+            "git_blob_before": "8f19522959dc3cb497046cdaef46d70937918537",
+            "git_blob_after": "a0f540b4d982eeef4696fa90318de3ecbc993d6d",
+            "matches_private_after": true,
+            "added": 1,
+            "removed": 1
+          },
+          {
+            "pr": 665,
+            "path": "internal/api/adopt_mcpcompat_test.go",
+            "before_sha256": "1c9400a300b08af5c04f59e1738b357df1965da2ad54f7688f30bb293521b490",
+            "after_sha256": "469c703c4678646076aed8d346ce4c70d0ff49cf5063752dab3dfc8a984cbbd9",
+            "git_blob_before": "a43df81f21c3107d149317cb5226f096b83208cc",
+            "git_blob_after": "6f336ba8b7b5d9fbb87e43387d3aff464c3b1c48",
+            "matches_private_after": true,
+            "added": 2,
+            "removed": 2
+          },
+          {
+            "pr": 665,
+            "path": "internal/api/adopt_project_plan_test.go",
+            "before_sha256": "4eccaebc6bfb3be956abce0b1b3f011baa23454fb09b43f7116ae2fefb557c40",
+            "after_sha256": "83938bc05419d530c579686b901f33d5324fa795d114fe50e54c71d79669cbb7",
+            "git_blob_before": "b4eefa18a4490275829eef8217148f9b701047ec",
+            "git_blob_after": "74b312a793fa54c51c94f52ca768d4b5d02dd5d3",
+            "matches_private_after": true,
+            "added": 4,
+            "removed": 4
+          },
+          {
+            "pr": 665,
+            "path": "internal/api/adopt_test.go",
+            "before_sha256": "e8023af03d1834255c08de894d83c2acd946dc29422fcb64b23afbc70306511c",
+            "after_sha256": "35a732e5c96b2f881f8bfc149008f2ebc6873fe7971ea637cb313fbbb1111aa8",
+            "git_blob_before": "19a853e732cb1d30bc54692e05d72a1b56438161",
+            "git_blob_after": "08b88a3e12d4e1a60238e0f76325d5dc7e967246",
+            "matches_private_after": true,
+            "added": 14,
+            "removed": 14
+          }
+        ]
+      },
+      {
+        "pr": 666,
+        "preimage_head": "e67472f606eac43efaf9aa0aab28d1994e73a7b2",
+        "patch": {
+          "sha256": "40ad504d3349d4559da0149b20df1b9f4ef32f4612ee5d5433c0159c336890b1",
+          "bytes": 1751
+        },
+        "files_changed": 2,
+        "added": 3,
+        "removed": 3,
+        "files": [
+          {
+            "pr": 666,
+            "path": "internal/cli/adopt_mcpcompat_test.go",
+            "before_sha256": "904164739b1ac56bfe4036ae43ce6f1679791d9d7d9ba96c0199e906b3451253",
+            "after_sha256": "1bece58170bc93053f2f6dbd5af2e6a6c47ace05187e1aa6c01021552215d88b",
+            "git_blob_before": "3a33178a57f99998ac9a86878a27b90636569d13",
+            "git_blob_after": "403eefdea619e4df0b57d56d22b618293d20b699",
+            "matches_private_after": true,
+            "added": 1,
+            "removed": 1
+          },
+          {
+            "pr": 666,
+            "path": "internal/cli/adopt_test.go",
+            "before_sha256": "9b8d81f913cb8f9e276b07b636465002706b161249c8ac61cf4a4e214856d218",
+            "after_sha256": "011bacb2b6b85f5f92a283d3b56cca55cc4e97354da70889a761d7206c599fe0",
+            "git_blob_before": "0cdd27c31a69d591e0a99ca1db162e4bbb822fb2",
+            "git_blob_after": "cbf5a0e603c7fb98233d275557c36b25da16abb8",
+            "matches_private_after": false,
+            "added": 2,
+            "removed": 2,
+            "private_after_difference": "Two original fixed-port call sites intentionally retained on the #666 preimage because current #664 independently covers dry-run allocation and the namespace refusal oracle."
+          }
+        ]
+      }
+    ],
+    "namespace_port_only_replacements": 11,
+    "exact_private_after_images": 8,
+    "gui_force_change_already_public": true,
+    "private_whole_tree_transplanted": false,
+    "runtime_tests_executed_by_this_recovery": false,
+    "public_exact_head_full_gate": "NOT_RUN",
+    "local_static_verification": [
+      "original Git blob identity",
+      "forward git apply --check",
+      "reverse git apply --check",
+      "git diff --no-index --check",
+      "GUI reverse check",
+      "8 exact private after-image hashes",
+      "Actual current #664 namespace and CLI files accept remaining scoped deltas; two covered CLI hunks excluded"
+    ],
+    "format_tool_limitation": "The available /usr/bin/go is a different utility and gofmt is absent; no toolchain was installed.",
+    "covered_upstream_dependencies": [
+      {
+        "pr": 664,
+        "head": "62199b68b2fc59095edacfe47d6990d48accbb2f",
+        "test": "TestAdoptCmdDryRunByDefaultMutatesNothingAndRedactsSecrets",
+        "reason": "Already handled by current #664 real-planner auto-port change.",
+        "included_in_current_666_delta": false
+      },
+      {
+        "pr": 664,
+        "head": "62199b68b2fc59095edacfe47d6990d48accbb2f",
+        "test": "TestAdoptCmdDryRunRefusesStateRootBeforeOfferingPlan",
+        "reason": "Already handled by current #664 bounded valid-plan seam; retained9314 is a plan datum and does not allocate a socket.",
+        "included_in_current_666_delta": false
+      }
+    ],
+    "publication_candidate_test_roots": 36,
+    "historical_private_test_roots": 38,
+    "upstream_compatibility_review_sha256": "1cbf5ec3d8e670a46571eefe2dd7a8d600a7cfad25b33b47c0e7101c3bc9f5d7"
+  },
+  "affected_test_observations": {
+    "source_commit": "aca81a1743ccfbf3e10902769a9b071eb911919e",
+    "mapping": {
+      "sha256": "76bba0ce646626fccd1ca9e620a99d5df6d0afea71452686f275dd9c973dd854",
+      "bytes": 16066
+    },
+    "completed_test_ledger": {
+      "sha256": "31d183a866145f07ab645cbf7b034949d68987b6b67e962f56af67ab63cdde8e",
+      "bytes": 689909
+    },
+    "default": "API and CLI suites NOT_STARTED",
+    "tagged_pass": 35,
+    "tagged_not_run": 3,
+    "public_head_equivalence_not_claimed": true,
+    "tests": [
+      {
+        "pr": 665,
+        "path": "internal/api/adopt_codex_transport_test.go",
+        "test": "TestAdoptCodexToolTimeoutRoundTripsBindingAndDeAdopt",
+        "default_status": "NOT_STARTED",
+        "tagged_status": "PASS"
+      },
+      {
+        "pr": 665,
+        "path": "internal/api/adopt_codex_transport_test.go",
+        "test": "TestBuildAdoptPlanCodexCollisionFreezesTargetEntryName",
+        "default_status": "NOT_STARTED",
+        "tagged_status": "PASS"
+      },
+      {
+        "pr": 665,
+        "path": "internal/api/adopt_codex_transport_test.go",
+        "test": "TestExecuteAndDeAdoptCodexCollisionUsesFrozenTargetEntry",
+        "default_status": "NOT_STARTED",
+        "tagged_status": "PASS"
+      },
+      {
+        "pr": 665,
+        "path": "internal/api/adopt_deadopt_lifecycle_test.go",
+        "test": "TestAdoptDeAdoptLifecycleRoundTrip",
+        "default_status": "NOT_STARTED",
+        "tagged_status": "PASS"
+      },
+      {
+        "pr": 665,
+        "path": "internal/api/adopt_h4_summary_signal_test.go",
+        "test": "TestAdoptAPI_HSettlementEventFailureCarriesCommittedRow",
+        "default_status": "NOT_STARTED",
+        "tagged_status": "PASS"
+      },
+      {
+        "pr": 665,
+        "path": "internal/api/adopt_h4_summary_signal_test.go",
+        "test": "TestAdoptCodexSettlementSurvivesOuterFailureWithoutAdoptSuccess",
+        "default_status": "NOT_STARTED",
+        "tagged_status": "PASS"
+      },
+      {
+        "pr": 665,
+        "path": "internal/api/adopt_h4_summary_signal_test.go",
+        "test": "TestAdoptNonCodexCompatibilityMatrixDoesNotEmitHSettlement",
+        "default_status": "NOT_STARTED",
+        "tagged_status": "PASS"
+      },
+      {
+        "pr": 665,
+        "path": "internal/api/adopt_h4_summary_signal_test.go",
+        "test": "TestCodexCollisionDryRunUsesPortableSettlementSummary",
+        "default_status": "NOT_STARTED",
+        "tagged_status": "PASS"
+      },
+      {
+        "pr": 665,
+        "path": "internal/api/adopt_h4_summary_signal_test.go",
+        "test": "TestCodexCollisionEmitsCommittedThenExplicitAlreadyConfigured",
+        "default_status": "NOT_STARTED",
+        "tagged_status": "PASS"
+      },
+      {
+        "pr": 665,
+        "path": "internal/api/adopt_h4_summary_signal_test.go",
+        "test": "TestCodexCollisionRelocationFailureEmitsNoCommittedSignal",
+        "default_status": "NOT_STARTED",
+        "tagged_status": "PASS"
+      },
+      {
+        "pr": 665,
+        "path": "internal/api/adopt_lease_namespace_windows_test.go",
+        "test": "TestBuildAdoptPlanWithLegacyLeaseNamespaceDoesNotMutate",
+        "default_status": "NOT_STARTED",
+        "tagged_status": "PASS"
+      },
+      {
+        "pr": 665,
+        "path": "internal/api/adopt_lease_namespace_windows_test.go",
+        "test": "TestExecuteAdoptDoesNotMigrateWhenStateRootIsRefused",
+        "default_status": "NOT_STARTED",
+        "tagged_status": "PASS"
+      },
+      {
+        "pr": 665,
+        "path": "internal/api/adopt_lease_namespace_windows_test.go",
+        "test": "TestExecuteAdoptLegacyLeaseMigrationFailureRollsBackWithoutLease",
+        "default_status": "NOT_STARTED",
+        "tagged_status": "PASS"
+      },
+      {
+        "pr": 665,
+        "path": "internal/api/adopt_lease_namespace_windows_test.go",
+        "test": "TestExecuteAdoptMigratesEligibleLegacyLeaseNamespaceAndRepeats",
+        "default_status": "NOT_STARTED",
+        "tagged_status": "PASS"
+      },
+      {
+        "pr": 665,
+        "path": "internal/api/adopt_lease_namespace_windows_test.go",
+        "test": "TestExecuteAdoptMigratesEligibleLegacyStateRoot",
+        "default_status": "NOT_STARTED",
+        "tagged_status": "PASS"
+      },
+      {
+        "pr": 665,
+        "path": "internal/api/adopt_lease_namespace_windows_test.go",
+        "test": "TestPreflightAdoptPlanAdmitsLegacyStateRootWithoutMutation",
+        "default_status": "NOT_STARTED",
+        "tagged_status": "PASS"
+      },
+      {
+        "pr": 665,
+        "path": "internal/api/adopt_lease_namespace_windows_test.go",
+        "test": "TestPreflightAdoptPlanRefusesHostileStateRootsWithoutMutation",
+        "default_status": "NOT_STARTED",
+        "tagged_status": "PASS"
+      },
+      {
+        "pr": 665,
+        "path": "internal/api/adopt_lease_namespace_windows_test.go",
+        "test": "TestPreflightAdoptPlanStateRootDriftRefusesApplyWithoutMutation",
+        "default_status": "NOT_STARTED",
+        "tagged_status": "PASS"
+      },
+      {
+        "pr": 665,
+        "path": "internal/api/adopt_lease_owner_test.go",
+        "test": "TestAdoptExecutedEventRequiresLeaseSettlement",
+        "default_status": "NOT_STARTED",
+        "tagged_status": "PASS"
+      },
+      {
+        "pr": 665,
+        "path": "internal/api/adopt_mcpcompat_test.go",
+        "test": "TestAdoptCodeGraphLegacyProfilePersistsAndRenders",
+        "default_status": "NOT_STARTED",
+        "tagged_status": "PASS"
+      },
+      {
+        "pr": 665,
+        "path": "internal/api/adopt_mcpcompat_test.go",
+        "test": "TestAdoptWithoutLegacyProfileRemainsStrict",
+        "default_status": "NOT_STARTED",
+        "tagged_status": "PASS"
+      },
+      {
+        "pr": 665,
+        "path": "internal/api/adopt_project_plan_test.go",
+        "test": "TestBuildAdoptPlanGlobalLegacyBehaviorRemainsUnchanged",
+        "default_status": "NOT_STARTED",
+        "tagged_status": "PASS"
+      },
+      {
+        "pr": 665,
+        "path": "internal/api/adopt_project_plan_test.go",
+        "test": "TestBuildAdoptPlanProjectSourceDerivesDistinctSameNameIdentities",
+        "default_status": "NOT_STARTED",
+        "tagged_status": "PASS"
+      },
+      {
+        "pr": 665,
+        "path": "internal/api/adopt_project_plan_test.go",
+        "test": "TestPrintAdoptPlanProjectSourceUsesProjectTargetText",
+        "default_status": "NOT_STARTED",
+        "tagged_status": "PASS"
+      },
+      {
+        "pr": 665,
+        "path": "internal/api/adopt_test.go",
+        "test": "TestAdoptPlanOutputReportsOmittedSameNameClients",
+        "default_status": "NOT_STARTED",
+        "tagged_status": "NOT_RUN"
+      },
+      {
+        "pr": 665,
+        "path": "internal/api/adopt_test.go",
+        "test": "TestAdoptSensitiveLiteralRoutesToVaultAndRedactsPlan",
+        "default_status": "NOT_STARTED",
+        "tagged_status": "PASS"
+      },
+      {
+        "pr": 665,
+        "path": "internal/api/adopt_test.go",
+        "test": "TestExecuteAdoptExitZeroRequiresAllReceivers",
+        "default_status": "NOT_STARTED",
+        "tagged_status": "PASS"
+      },
+      {
+        "pr": 665,
+        "path": "internal/api/adopt_test.go",
+        "test": "TestExecuteAdoptInstallFailureRemovesAdoptCreatedManifestAndSaysRerun",
+        "default_status": "NOT_STARTED",
+        "tagged_status": "NOT_RUN"
+      },
+      {
+        "pr": 665,
+        "path": "internal/api/adopt_test.go",
+        "test": "TestExecuteAdoptRefusesUnavailableVaultBeforeManifestWrite",
+        "default_status": "NOT_STARTED",
+        "tagged_status": "NOT_RUN"
+      },
+      {
+        "pr": 665,
+        "path": "internal/api/adopt_test.go",
+        "test": "TestExecuteAdoptRemovesManifestLeaseAfterVerifiedSuccess",
+        "default_status": "NOT_STARTED",
+        "tagged_status": "PASS"
+      },
+      {
+        "pr": 665,
+        "path": "internal/api/adopt_test.go",
+        "test": "TestExecuteAdoptRollbackRestoresDirectStdioPriorFromBackupOnSecondClientFailure",
+        "default_status": "NOT_STARTED",
+        "tagged_status": "PASS"
+      },
+      {
+        "pr": 665,
+        "path": "internal/api/adopt_test.go",
+        "test": "TestExecuteAdoptScopedConsentDoesNotAuthorizeConcurrentNonAdoptWrite",
+        "default_status": "NOT_STARTED",
+        "tagged_status": "PASS"
+      },
+      {
+        "pr": 665,
+        "path": "internal/api/adopt_test.go",
+        "test": "TestExecuteAdoptWritesManifestIntentAndRepointsCodexPreservingForeignTables",
+        "default_status": "NOT_STARTED",
+        "tagged_status": "PASS"
+      },
+      {
+        "pr": 666,
+        "path": "internal/cli/adopt_mcpcompat_test.go",
+        "test": "TestAdoptCLIProfilePersistsAndBuildsLegacyHost",
+        "default_status": "NOT_STARTED",
+        "tagged_status": "PASS"
+      },
+      {
+        "pr": 666,
+        "path": "internal/cli/adopt_test.go",
+        "test": "TestAdoptCLI_GlobalCodexSameNamePathHasNoHSettlement",
+        "default_status": "NOT_STARTED",
+        "tagged_status": "PASS"
+      },
+      {
+        "pr": 666,
+        "path": "internal/cli/adopt_test.go",
+        "test": "TestAdoptCmdDryRunByDefaultMutatesNothingAndRedactsSecrets",
+        "default_status": "NOT_STARTED",
+        "tagged_status": "PASS"
+      },
+      {
+        "pr": 666,
+        "path": "internal/cli/adopt_test.go",
+        "test": "TestAdoptCmdDryRunRefusesStateRootBeforeOfferingPlan",
+        "default_status": "NOT_STARTED",
+        "tagged_status": "PASS"
+      },
+      {
+        "pr": 666,
+        "path": "internal/cli/adopt_test.go",
+        "test": "TestAdoptLeaseCleanupFailureKeepsCLIChannelsRedacted",
+        "default_status": "NOT_STARTED",
+        "tagged_status": "PASS"
+      }
+    ],
+    "scope": "Historical private source 38-root delta; retained unchanged after publication candidate was narrowed"
+  },
+  "closed_v9_resource_retirement": {
+    "schema": "independent-closed-v9-retirement-review-v1",
+    "status": "PASS",
+    "scope": "read-only review of pinned v2 delta, qualification, receipt and all four journals; no additional native operation",
+    "script_sha256": "40ecbc3c44811ab92d167601d0716fd9ae9d49afb9062a17b19a1cf75cafce24",
+    "plan_sha256": "78b8cc17e2060014733014357ee60b1475eb3a4ede07bd152f10f32ca6d9055e",
+    "receipt_sha256": "7158a28705eb6d923ea0aa3b14664dc30a85974695f5b742702c54eb3978bc84",
+    "qualification_sha256": "66a0cd65c7f01c59eeaea90bfdedac0e94dddf3184940c2f842ced4dae0f6d6a",
+    "v1_failure_sha256": "64c94738e02244872d5540d6b99d828fd6e0cafc7d97225f3d6920afc0f97623",
+    "qualification_events": [
+      {
+        "form": "relative_root_handle",
+        "error": "OSError(87, 'rename original directory without replacement: The parameter is incorrect.')"
+      },
+      {
+        "form": "absolute_existing_target",
+        "error": "OSError(183, 'absolute original-directory rename: Cannot create a file when that file already exists.')",
+        "both_unchanged": true
+      },
+      {
+        "form": "absolute_new_target",
+        "same_original_identity": true,
+        "source_absent": true
+      }
+    ],
+    "qualification_original_handles_closed": true,
+    "moves": [
+      {
+        "name": "seed-modules",
+        "journal_sha256": "6e764e5b2f1786ff63b529e2d5f61cdc04ff52ed5bad6c1d3b401bd199bbc1c4",
+        "phases": [
+          "PREPARED",
+          "MOVED"
+        ],
+        "same_original_identity": true,
+        "source_absent": true,
+        "empty_required": false,
+        "journal_outside_trash": true
+      },
+      {
+        "name": "isolated-build-cache",
+        "journal_sha256": "52c39a3a42be6eedf276c2174a703a735bbffe00b00da0fd91c4845b11b8144b",
+        "phases": [
+          "PREPARED",
+          "MOVED"
+        ],
+        "same_original_identity": true,
+        "source_absent": true,
+        "empty_required": false,
+        "journal_outside_trash": true
+      },
+      {
+        "name": "d9",
+        "journal_sha256": "bde1e13f207d4e2f078befd803ca2ecbd11965534b39867c63f9dfce715656dd",
+        "phases": [
+          "PREPARED",
+          "MOVED"
+        ],
+        "same_original_identity": true,
+        "source_absent": true,
+        "empty_required": true,
+        "journal_outside_trash": true
+      },
+      {
+        "name": "s9",
+        "journal_sha256": "faa491c5039ee6f9fde6fecdbaa882bd6bc4438c523aa9302cd28c09af3410e1",
+        "phases": [
+          "PREPARED",
+          "MOVED"
+        ],
+        "same_original_identity": true,
+        "source_absent": true,
+        "empty_required": true,
+        "journal_outside_trash": true
+      }
+    ],
+    "all_bound_control_paths_outside_trash": true,
+    "delete_copy_replace_or_acl_change": false,
+    "raw_captures_or_cache_contents_read": false,
+    "original_failure_rewritten": false,
+    "parent_terminal_exit_source": "root original tool return: exit 0, 10.25 seconds; not inferred from inner receipt"
+  },
+  "external_review": {
+    "status": "REVIEW_PENDING",
+    "scope": "Exact current/published public heads require their own external review. No approval inferred from native/internal review or old-head comments.",
+    "new_external_review_requested": false,
+    "reviews_or_actions_rerun_by_this_recovery": false
+  },
+  "skill_application": {
+    "fully_read_and_applied_this_recovery": 3,
+    "unique_team_count_increment": 0,
+    "prior_total_recertified": false,
+    "entries": [
+      {
+        "name": "code-review-and-quality",
+        "package": "skill://plugins_6ab00825b73c8191b684c13fdd7a0280/code-review-and-quality",
+        "fully_read_this_recovery": true,
+        "applied": "Reviewed complete ten-file delta, assertions, repetition, negative cases and private/public namespace compatibility; separated code review from full-gate and external approval.",
+        "result": "No remaining defect found after removing two already-covered CLI hunks; full public-head execution remains NOT_RUN.",
+        "reused_from_prior_team_work": true
+      },
+      {
+        "name": "git-workflow-and-versioning",
+        "package": "skill://plugins_6ab00825b73c8191b684c13fdd7a0280/git-workflow-and-versioning",
+        "fully_read_this_recovery": true,
+        "applied": "Bound public preimages to exact heads/blob IDs; validated apply/reverse/whitespace and actual #664 overlapping files; excluded already-public GUI and two upstream-covered CLI changes; preserved concurrent #664 audit.",
+        "result": "Two reviewable patches (API8,CLI2), no commit/push by this reviewer.",
+        "reused_from_prior_team_work": true
+      },
+      {
+        "name": "documentation-and-adrs",
+        "package": "skill://plugins_6ab00825b73c8191b684c13fdd7a0280/documentation-and-adrs",
+        "fully_read_this_recovery": true,
+        "applied": "Kept source-specific qualification and failure evidence, recorded immutable SHA-256 controls and pending acceptance, preserved older audit/checkpoint text.",
+        "result": "Scoped checkpoint and evidence projection; no claim that lost transient packet was recovered unchanged.",
+        "reused_from_prior_team_work": true
+      }
+    ],
+    "excluded": "Unrelated visual, product-design, infrastructure replacement and paid reviewer roles were not applied for numerical coverage."
+  },
+  "limitations": [
+    "Original old UNKNOWN scope remains unchanged and is not admitted by these later CLOSED_FAIL records.",
+    "Native custody qualification PASS does not imply a full regression PASS.",
+    "A test PASS in the private source does not imply an exact public-head PASS.",
+    "The current #637 production delta and concurrent #664 fixture/audit delta are preserved and require their own integration; they are not silently imported into ACA.",
+    "Fourteen tagged Serena migration roots paused without CONT; the full-v10 run does not establish their execution or a new Serena qualification."
+  ],
+  "publication_candidate_observations": {
+    "scope": "Only current 36 candidate roots, selected from immutable historical private ledger; not execution of the current public tree",
+    "test_source_commit": "aca81a1743ccfbf3e10902769a9b071eb911919e",
+    "roots": 36,
+    "tagged_pass": 33,
+    "tagged_not_run": 3,
+    "api_roots": 33,
+    "cli_roots": 3,
+    "public_head_equivalence_not_claimed": true,
+    "excluded_upstream_roots": [
+      "TestAdoptCmdDryRunByDefaultMutatesNothingAndRedactsSecrets",
+      "TestAdoptCmdDryRunRefusesStateRootBeforeOfferingPlan"
+    ],
+    "candidate_test_names_sha256": "6b8c398bf6db5058a26a7d2bb05e50f553860ea27a8e37622bb1a27e5183e3cc"
+  }
+}

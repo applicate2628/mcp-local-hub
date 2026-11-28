@@ -1,0 +1,173 @@
+{
+  "schema": "original-v6-source-preservation-artifact-manifest-v1",
+  "prepared_date": "2026-11-28",
+  "payload_files_excluding_manifest": 29,
+  "source_revisions": 22,
+  "exact_source_files": 12,
+  "transparent_templates": 10,
+  "role_substitutions": 18,
+  "exact_public_inputs_linked_without_duplication": 5,
+  "original_source_total_bytes": 422939,
+  "files": [
+    {
+      "path": ".gitattributes",
+      "bytes": 8,
+      "sha256": "705fd4d6451a31d36b3df7de96f83f30ac976c9b4a6d1e51671d8e2f33e2d0da"
+    },
+    {
+      "path": "README.md",
+      "bytes": 16576,
+      "sha256": "17ffeeac36d8821a38e77cc36e09d6fc602d963edb5db118939e4a81e845c28b"
+    },
+    {
+      "path": "source-bindings.json",
+      "bytes": 15888,
+      "sha256": "6aa4972cdb658c70c39eafcce74da671ede759b3fa0c78a29773834fec20d55d"
+    },
+    {
+      "path": "existing-public-inputs.json",
+      "bytes": 5706,
+      "sha256": "b79ca440041d113d243eb7647d2a00d8f1f9cf7f1eae041b3edf4f81829f5fbb"
+    },
+    {
+      "path": "data-reconstruction-proof.json",
+      "bytes": 12748,
+      "sha256": "fb794d0887cdbc350151bc9d3066ff494c0a4fa1472aea76a66c2fccf407e773"
+    },
+    {
+      "path": "reconstruct_sources.py",
+      "bytes": 6943,
+      "sha256": "7441c4f529fda6fc87141ec96442a25145e5ff459ba3a2af82763e38a63905e4"
+    },
+    {
+      "path": "metadata/templates-manifest.json",
+      "bytes": 3691,
+      "sha256": "573b788670b38cc6675fa1e9fc100cda95385049cc9d744363bca1cc87caa89b"
+    },
+    {
+      "path": "templates/inputs-original-v6/build_private_inputs_v6.ps1.template",
+      "bytes": 15821,
+      "sha256": "ef372660ea63ee1cf88d0c57e83014f8a6028504b19406e3b583fb7a5a91ae05"
+    },
+    {
+      "path": "templates/inputs-original-v6/build_private_inputs_v7.ps1.template",
+      "bytes": 15838,
+      "sha256": "a0bbcccaff2766077a01a0dbac6da6776a4db3a8e96dd72ad6345bb410cdf6a3"
+    },
+    {
+      "path": "sources/inputs-original-v6/probe_private_date_v7.ps1",
+      "bytes": 2145,
+      "sha256": "4a3ead5ca5a222a8a8a8b6cab00228c19b5503711a65b61bd80bd62d1c3f5a1f"
+    },
+    {
+      "path": "templates/inputs-original-v6/copy_closed_caches_v6.py.template",
+      "bytes": 9445,
+      "sha256": "44db066fb8faf34cf2a22d5f2e5c730cab42c0b209a6e0b301b079bc8564f7c7"
+    },
+    {
+      "path": "templates/inputs-original-v6/copy_original_artifacts_v6.py.template",
+      "bytes": 6892,
+      "sha256": "662cddbff30b750c3eea9c2c31681c7713982f603d51606a696372d18c773e76"
+    },
+    {
+      "path": "templates/inputs-original-v6/invoke_fixed_build_utf8.ps1.template",
+      "bytes": 6288,
+      "sha256": "206a486d938526905141d3c280b049c431e95be0e8a0c693a57f5abd96e0e31e"
+    },
+    {
+      "path": "sources/inputs-original-v6/launch_literal_v6.py.in",
+      "bytes": 7711,
+      "sha256": "adf9f26a647aa6e869bc3dc25a6c13b5b913b2295f2629e77d10f36058e7493f"
+    },
+    {
+      "path": "sources/inputs-original-v6/literal_go_exec_adapter_v6.py.in",
+      "bytes": 77605,
+      "sha256": "6ee83887864e3be983ccd31628926f4026007ba9df0f296e9cd5504faeefe886"
+    },
+    {
+      "path": "sources/inputs-original-v6/literal_migration_receiving_v6.py.in",
+      "bytes": 35572,
+      "sha256": "6a95ae02fe24245a293ffd0f0e6083baf0754df2a13ce2ee2daedf43cf6e4526"
+    },
+    {
+      "path": "templates/inputs-original-v6/prepare_literal_v6.py.template",
+      "bytes": 12365,
+      "sha256": "4419bf696c0e553fd365e63d2d8bd2e7c1d90f48c8cfa82355722ce3a275e26a"
+    },
+    {
+      "path": "templates/inputs-original-v6/private_migration_scope_v6.py.template",
+      "bytes": 12556,
+      "sha256": "82e50d4625cc068c8209108b704e3b4a79f4dff64e76bd91483f3f5302cfe7be"
+    },
+    {
+      "path": "sources/inputs-original-v6/private_run_scope.py.in",
+      "bytes": 12458,
+      "sha256": "ce16701c0c8951d73a9e002c0447fe108ee2bcaa31437bde63bc184e509ec654"
+    },
+    {
+      "path": "sources/inputs-original-v6/qualified_windows_products_consumer_v6.py.in",
+      "bytes": 36122,
+      "sha256": "716e2e0aeb7e94b5bd302149e7765c8d5708378bc94f2d2de959dfc063c2592d"
+    },
+    {
+      "path": "sources/inputs-original-v6/receive_private_graph_v6.py",
+      "bytes": 6899,
+      "sha256": "1d6895719d79d1b53edaab13d6aa8bd7d19e2efe2c87b0003e543f44cd64fe01"
+    },
+    {
+      "path": "sources/inputs-original-v6/run_literal_go_gate_v6.py.in",
+      "bytes": 43670,
+      "sha256": "a1aecc2d2db889f2aa4d6d58bc885bac6cfd545fd9f55e4c0055ea1eed83a422"
+    },
+    {
+      "path": "sources/inputs-original-v6/run_partitioned_go_gate_v6.py.in",
+      "bytes": 9851,
+      "sha256": "9b81714df735fe5e5196be944312a717d8e1d75ca9195506dd9e609c23f330a9"
+    },
+    {
+      "path": "templates/inputs-original-v6/external-prepare-candidate/prepare_external_controllers_v6.py.template",
+      "bytes": 11584,
+      "sha256": "9acc9d5ea40ccf22c34275c4dbf8d402a046f066e9e6119eeaca50f807579a1b"
+    },
+    {
+      "path": "templates/inputs-original-v6/external-prepare-candidate/private_external_scope_v6.py.template",
+      "bytes": 12629,
+      "sha256": "ffd10dcf65de888c17b76cc2aede67e87d306cab215f9c607935289ceb5c5d7f"
+    },
+    {
+      "path": "templates/inputs-original-v6/external-source-original/literal_contained_test_receiver_v4.go.template",
+      "bytes": 17395,
+      "sha256": "817e93de849ace4485b08b9c242500bf3a5a12210c5ff0e5bd893cbe4bc6bab8"
+    },
+    {
+      "path": "sources/inputs-original-v6/external-source-original/controller/cases_windows.go",
+      "bytes": 19075,
+      "sha256": "9b1af23646315fc6b08c45a634ae5adebb05635c38fb21e4e56e0fb152184631"
+    },
+    {
+      "path": "sources/inputs-original-v6/external-source-original/controller/main_windows.go",
+      "bytes": 23646,
+      "sha256": "c48b5b339d7ece5cd6ecdad4c870e0968a33867e1bc5f2ae0e2b5a58f3b591ef"
+    },
+    {
+      "path": "sources/inputs-original-v6/external-source-original/owner/canonicalcaseowner/events_windows_amd64.go",
+      "bytes": 27574,
+      "sha256": "3b3137d2bdc6284a497fe2052d3e78e7bd426a0f7694b381043523e555c0a1fa"
+    }
+  ],
+  "source_bindings_sha256": "6aa4972cdb658c70c39eafcce74da671ede759b3fa0c78a29773834fec20d55d",
+  "in_memory_data_reconstruction_all_22_equal": true,
+  "actual_written_payloads_rehashed": true,
+  "reconstructor_ast_parsed_as_data": true,
+  "reconstructor_invoked_or_imported": false,
+  "preserved_sources_imported_or_executed": false,
+  "product_test_model_build_git_or_publication_commands_started": false,
+  "original_source_files_changed_by_this_preparation": false,
+  "publication_worktree_or_report_changed_by_this_preparation": false,
+  "frozen_evidence_v1_v2_changed_by_this_preparation": false,
+  "original_host_role_values_embedded_or_encoded": false,
+  "machine_path_or_credential_findings": [],
+  "date_regex_fragments_preserved_count": 9,
+  "qualification_scope": "Source preservation and DATA reconstruction only; historical or new execution qualification is not inherited.",
+  "byte_preservation": ".gitattributes contains * -text"
+}

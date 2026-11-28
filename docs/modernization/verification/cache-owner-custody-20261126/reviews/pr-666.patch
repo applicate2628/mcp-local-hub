@@ -1,0 +1,33 @@
+diff --git a/internal/cli/adopt_mcpcompat_test.go b/internal/cli/adopt_mcpcompat_test.go
+--- a/internal/cli/adopt_mcpcompat_test.go
++++ b/internal/cli/adopt_mcpcompat_test.go
+@@ -42,7 +42,7 @@
+ 	cmd := newAdoptCmdWithDeps(api.NewAPI, nil, func(context.Context, *api.API, *api.AdoptPlan, *api.AdoptProvenanceRecord) error { return nil })
+ 	var out bytes.Buffer
+ 	cmd.SetOut(&out)
+-	cmd.SetArgs([]string{entry, "--client", "codex-cli", "--port", "9371", "--mcp-protocol-compatibility-profile", "stdio-http-legacy-2024-11-05", "--yes"})
++	cmd.SetArgs([]string{entry, "--client", "codex-cli", "--mcp-protocol-compatibility-profile", "stdio-http-legacy-2024-11-05", "--yes"})
+ 	if err := cmd.Execute(); err != nil {
+ 		t.Fatalf("adopt: %v\n%s", err, out.String())
+ 	}
+diff --git a/internal/cli/adopt_test.go b/internal/cli/adopt_test.go
+--- a/internal/cli/adopt_test.go
++++ b/internal/cli/adopt_test.go
+@@ -338,7 +338,7 @@
+ 	var stdout, stderr bytes.Buffer
+ 	cmd.SetOut(&stdout)
+ 	cmd.SetErr(&stderr)
+-	cmd.SetArgs([]string{entry, "--client", "codex-cli", "--port", "9342", "--yes"})
++	cmd.SetArgs([]string{entry, "--client", "codex-cli", "--yes"})
+ 	err := cmd.Execute()
+ 	if err == nil || err.Error() != "E_ADOPT_LEASE_CLEANUP" {
+ 		t.Fatalf("CLI exit error=%v, want E_ADOPT_LEASE_CLEANUP", err)
+@@ -414,7 +414,7 @@
+ 	cmd := newAdoptCmdWithDeps(api.NewAPI, nil, func(context.Context, *api.API, *api.AdoptPlan, *api.AdoptProvenanceRecord) error { return nil })
+ 	var out bytes.Buffer
+ 	cmd.SetOut(&out)
+-	cmd.SetArgs([]string{entry, "--client", "codex-cli", "--port", "9344", "--yes"})
++	cmd.SetArgs([]string{entry, "--client", "codex-cli", "--yes"})
+ 	if err := cmd.Execute(); err != nil {
+ 		t.Fatalf("global-only adopt: %v\n%s", err, out.String())
+ 	}

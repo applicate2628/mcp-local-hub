@@ -1,0 +1,22 @@
+{
+  "schema": "root-owner-custody-native-qualification-v1",
+  "status": "PASS",
+  "controller_exit_code": 0,
+  "original_controller_reaped": true,
+  "controller_capture_handles_closed": true,
+  "seconds": 5.8465998000174295,
+  "diagnostic": null,
+  "receipt_sha256": "956e537fe69e7d710028630ab1bb07e7e52572b9344cdb2f2b1d221dae6ba92e",
+  "inputs": {
+    "guard-custody.py": "56d6ccee190472cbdacd5f0ec5f7636df3487f27ec208e0776c20c12a22b72f2",
+    "literal_go_exec_adapter_ready_v1.py": "e9ad8ea12d6e87833c8d5f347602a352e0a1733e8bf8ba83a9d6a3b36828403f",
+    "run_literal_go_gate_ready_v1.py": "1af0f9e564f876d1d1ae879ad1b11dc7875287be181413376e2f32bdd155f551",
+    "qualified_windows_products_consumer_v1.py": "87fafb9ed3b2f17f36b2829b41cc3a38a102198132dde04768131fc91491d6e1",
+    "qualify_owner_custody_local.py": "199c9183bb080565155f60003eed9f6ad4ee0a32c32c38c74ed8ed7746a87691"
+  },
+  "scope": "actual new guard/RootInvocation/broker; synthetic tool output; installed Go metadata read-only",
+  "consumer_timeout_probe": "deterministic consumer-only monotonic expiry injection; not measured real355s latency",
+  "full_regression_executed": false,
+  "serena_qualification_repeated": false,
+  "old_unknown_reclassified": false
+}

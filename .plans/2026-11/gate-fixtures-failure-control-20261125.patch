@@ -1,0 +1,38 @@
+--- a/internal/sonnet/server_test.go
++++ b/internal/sonnet/server_test.go
+@@ -1206,18 +1206,23 @@
+ func TestRunStorePersistsAppendOnlyGenerationSnapshots(t *testing.T) {
+ 	projectRoot := writeProject(t)
+ 	storeRoot := t.TempDir()
+-	s := NewServer(testConfig(storeRoot, &fakeDriver{}))
++	driver := &fakeDriver{start: make(chan struct{}), done: make(chan struct{})}
++	s := NewServer(testConfig(storeRoot, driver))
+ 	defer func() {
+ 		// Fatal must still join this original owner before TempDir cleanup.
+ 		// A stuck owner remains subject to the package test deadline.
+ 		if err := s.Close(context.Background()); err != nil {
+ 			t.Errorf("owner cleanup: %v", err)
+-		}
++			return
++		}
++		t.Log("AUDIT_SONNET_ORIGINAL_CLOSE_OBSERVED")
+ 	}()
+ 	started, err := s.Start(context.Background(), StartRequest{ProjectRoot: projectRoot, ProjectFile: "sample.son", TimeoutSeconds: 10})
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
++	<-driver.start
++	t.Fatal("AUDIT_EXPECTED_FATAL_AFTER_SONNET_START")
+ 	waitTerminal(t, s, started.RunID)
+ 	if err := s.Close(context.Background()); err != nil {
+ 		t.Fatal(err)
+--- a/internal/daemonrecovery/recovery_test.go
++++ b/internal/daemonrecovery/recovery_test.go
+@@ -1314,6 +1314,7 @@
+ 	attemptStarted := time.Now()
+ 	var respawnElapsed, respawnRemaining time.Duration
+ 	deps.Respawn = func(respawnCtx context.Context, task string, force bool) (api.RespawnResult, error) {
++		t.Fatal("AUDIT_EXPECTED_RECOVERY_CALLBACK_GOEXIT")
+ 		respawnElapsed = time.Since(attemptStarted)
+ 		deadline, ok := respawnCtx.Deadline()
+ 		if !ok {

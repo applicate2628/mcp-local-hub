@@ -1,0 +1,125 @@
+{
+  "schema": "lostchild-loop-cleanup-progress-v1",
+  "status": "SOURCE_COMMITTED_TESTS_NOT_RUN",
+  "repository": "applicate2628/mcp-local-hub",
+  "pull_request": 664,
+  "public_head": "0e8bec723af3f4a52f158e29d2447836ae887374",
+  "baseline_source": "6d4fa7b8f9b86079020af125b030a26350cb5bb0",
+  "final_source": {
+    "commit": "52a2d9ef57b7c372b9fa149adf062ad7e503b22d",
+    "tree": "51258ebd9ad3a654418b6ecb9163947734ef0314",
+    "parent": "6d4fa7b8f9b86079020af125b030a26350cb5bb0",
+    "clean_readback": true,
+    "receipt_sha256": "7310b496e3d248c41f2035ff0c4aa942c142330f4131fade9b4ba235a422c9a3",
+    "receipt_status": "PASS",
+    "commands_closed": 7,
+    "readers_closed": 14,
+    "provenance": "root received native source-commit and clean readback; not runtime-test evidence"
+  },
+  "changed_file": {
+    "path": "internal/cli/supervise_lostchild_f6_f2_test.go",
+    "before": {
+      "bytes": 40971,
+      "sha256": "db977a528f7b8c85d8d5198ffe82f1f2caad5ce7da42ecc7fb78255c339d06d0",
+      "git_blob": "607e3dd5ce78970f5af027200718d20c350b37a8"
+    },
+    "after": {
+      "bytes": 41462,
+      "sha256": "8bd40a8b1d41becc6d21192044883f994516e666951d781a61cc1eda71e65be4",
+      "git_blob": "8d6414f0e64d6dd02fbacbca357a6edd692aa359"
+    },
+    "public_baseline_equals_reviewed_source_baseline": true,
+    "mapping": "narrow helper and ten call-site replacements applied to exact public preimage"
+  },
+  "code_patch": {
+    "bytes": 4396,
+    "sha256": "8bb24d8fea30c78f7209ea52e9d7c2854d40eea00d871f2ec610fb6912113a89",
+    "git_blob": "a36bcc85eb03099b803e818b15e0efea05eeb120"
+  },
+  "review": {
+    "own_review": "completed by root",
+    "independent_review": "functional_review; no blocking finding in original-loop cleanup scope",
+    "independent_review_record_sha256": "d6de45a51f8e8f0cdcdb0829e677b6db981d8c66c0937d8a5ca24ac603f01ecf",
+    "entire_candidate_file_read": true,
+    "helper_added_lines": 16,
+    "loop_start_replacements": 10,
+    "production_changed": false,
+    "assertions_or_deadlines_changed": false,
+    "original_loop_joined_by_cleanup": true,
+    "every_controller_timer_joined_claim": false,
+    "failed_runtime_handler_stack_localized": false
+  },
+  "affected_existing_tests": [
+    "TestSupervisorController_QuarantineParole_FiresAfterCooldownAndClears",
+    "TestSupervisorController_QuarantineParole_ExponentialAndBounded",
+    "TestSupervisorController_QuarantineParole_RespectsStoppedIntent",
+    "TestSupervisorController_ParoleTick_OnLoopDispatchFires",
+    "TestSupervisorController_ParoleGraduationVsThreshold_NoWedge",
+    "TestSupervisorController_ParolePostRoutesThroughQuarantined",
+    "TestSupervisorController_ParoleQueuedStop_PostSelfHonorsStop",
+    "TestSupervisorController_StaleLivenessDisownDroppedByGeneration",
+    "TestSupervisorController_QuarantineParole_ClassFlipToJobRefusedClearsLadder",
+    "TestSupervisorController_QuarantineParole_BareTaskNameKeyParoled"
+  ],
+  "verification": {
+    "source": "52a2d9ef57b7c372b9fa149adf062ad7e503b22d",
+    "affected_tests": "NOT_RUN",
+    "dedicated_orphan_regression": "NOT_RUN",
+    "build": "NOT_RUN",
+    "vet": "NOT_RUN",
+    "native_happy": "NOT_RUN",
+    "default_full_command": "NOT_RUN",
+    "tagged_full_command": "NOT_RUN"
+  },
+  "source_capsule": {
+    "path": null,
+    "status": "assembled separately by root; exact publication path not yet received"
+  },
+  "preserved_history": {
+    "source6d": {
+      "commit": "6d4fa7b8f9b86079020af125b030a26350cb5bb0",
+      "receipt_sha256": "fc4e69767c640a4584e914213fbea35731d992e67975ca05c5a8bcfd076a700a",
+      "status": "FAIL",
+      "resources": "CLOSED",
+      "commands_closed": 3,
+      "readers_closed": 6,
+      "default_focused": {
+        "status": "PASS",
+        "top_level_passed": 40,
+        "passed_including_subtests": 88
+      },
+      "tagged_focused": {
+        "status": "FAIL",
+        "api_package": "PASS",
+        "cli_package": "FAIL",
+        "top_level_passed": 151,
+        "passed_including_subtests": 315,
+        "skipped": 1,
+        "failed": 1,
+        "failed_test": "TestSupervisorController_StaleLivenessDisownDroppedByGeneration",
+        "sanitized_diagnostic": "TempDir RemoveAll cleanup failed: directory not empty"
+      },
+      "new_hold": false
+    },
+    "older_negative_batch": {
+      "source": "5ed87ff759405efa739229b7307b5c2f9579c8fc",
+      "receipt_sha256": "ad50e0a1a66cbf53a051518920f9f4db8574447f95e7c66d979dd566b60b4d84",
+      "status": "FAIL/HOLD",
+      "physical_receipt_sha256": "5b95d83b0feaa8276e587242036e1051d1058c03d2d8bc07eb4784c549ad1f7a",
+      "physical_status": "UNKNOWN",
+      "historical_status_reclassified": false,
+      "failed_captures_accessed_for_this_supplement": false
+    }
+  },
+  "preparation": {
+    "native_commands_started_by_author": false,
+    "native_mutations_by_author": false,
+    "published": false,
+    "held_invocation_modified": false,
+    "prior_source6d_packet_modified": false
+  },
+  "public_new_document_preconditions": {
+    "README.md": "GitHub NOT_FOUND at exact public head",
+    "evidence.json": "GitHub NOT_FOUND at exact public head"
+  }
+}

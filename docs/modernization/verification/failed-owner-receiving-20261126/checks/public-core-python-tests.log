@@ -1,0 +1,14 @@
+test_actual_callback_reads_only_original_metadata_and_freezes_binding (__main__.AdapterFailedReceivingTests.test_actual_callback_reads_only_original_metadata_and_freezes_binding) ... ok
+test_actual_issuer_and_existing_core_finalizer_receive_same_custody (__main__.AdapterFailedReceivingTests.test_actual_issuer_and_existing_core_finalizer_receive_same_custody) ... ok
+test_callback_is_passed_before_raw_command_can_time_out (__main__.AdapterFailedReceivingTests.test_callback_is_passed_before_raw_command_can_time_out) ... ok
+test_foreign_original_row_is_refused_before_read (__main__.AdapterFailedReceivingTests.test_foreign_original_row_is_refused_before_read) ... ok
+test_normal_reader_close_failure_permanently_holds_late_receiving (__main__.AdapterFailedReceivingTests.test_normal_reader_close_failure_permanently_holds_late_receiving) ... ok
+test_read_close_failure_is_retained_without_retry (__main__.AdapterFailedReceivingTests.test_read_close_failure_is_retained_without_retry) ... ok
+test_closed_originals_with_late_read_error_keep_failure (__main__.FailedPhysicalDataTests.test_closed_originals_with_late_read_error_keep_failure) ... ok
+test_distinguishing_refusals (__main__.FailedPhysicalDataTests.test_distinguishing_refusals) ... ok
+test_source_owned_no_create_requires_no_native_creation (__main__.FailedPhysicalDataTests.test_source_owned_no_create_requires_no_native_creation) ... ok
+
+----------------------------------------------------------------------
+Ran 9 tests in 0.075s
+
+OK

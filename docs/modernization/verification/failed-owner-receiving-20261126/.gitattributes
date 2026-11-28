@@ -1,0 +1,2 @@
+# Keep the exact Windows receipt bytes and SHA-256.
+native-go-v1/receipt.json -text

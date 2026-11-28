@@ -1,0 +1,100 @@
+diff --git a/internal/process/run_strictly_contained_windows_test.go b/internal/process/run_strictly_contained_windows_test.go
+index 17e60f3fbc598c8d608180c0334ec25a2651f12c..3034a398598215aa8162a08b6884354e6408e7e3 100644
+--- a/internal/process/run_strictly_contained_windows_test.go
++++ b/internal/process/run_strictly_contained_windows_test.go
+@@ -101,21 +101,71 @@
+ 			}
+ 			cmd := exec.Command(os.Args[0], "-test.run=^TestRunStrictlyContained_WindowsTimeoutProofWindowFastAndSlow$")
+ 			cmd.Env = append(os.Environ(), "MCPHUB_STRICT_PROOF_WINDOW_HELPER=1")
++			native := job.terminationOperations()
++			clock := time.Now()
+ 			firstWait := time.Time{}
+-			realSignaled := false
+-			job.terminationOps = &jobTerminationOps{wait: func(h windows.Handle) (uint32, error) {
+-				if firstWait.IsZero() {
+-					firstWait = time.Now()
+-				}
+-				if time.Since(firstWait) < tc.delay {
+-					return uint32(windows.WAIT_TIMEOUT), nil
+-				}
+-				status, waitErr := windows.WaitForSingleObject(h, 0)
+-				if waitErr == nil && status == uint32(windows.WAIT_OBJECT_0) {
+-					realSignaled = true
+-				}
+-				return status, waitErr
+-			}}
++			var originalHandle windows.Handle
++			nativeSignalReceived, realSignaled := false, false
++			job.terminationOps = &jobTerminationOps{
++				openProcess: func(pid uint32) (windows.Handle, error) {
++					h, openErr := native.openProcess(pid)
++					if openErr == nil && pid == uint32(cmd.Process.Pid) {
++						// Borrow the member handle already owned by TerminateAll.
++						originalHandle = h
++					}
++					return h, openErr
++				},
++				terminate: func(job *Job) error {
++					if err := native.terminate(job); err != nil {
++						return err
++					}
++					if originalHandle == 0 {
++						return errors.New("fixture did not capture its original member handle")
++					}
++					// Receive real exit and same-Job accounting before the model clock.
++					// One native deadline bounds synchronization, not exit latency.
++					syncDeadline := native.now().Add(5 * time.Second)
++					for {
++						status, waitErr := windows.WaitForSingleObject(originalHandle, 0)
++						info, accountingErr := native.accounting(job)
++						if waitErr != nil || accountingErr != nil {
++							return errors.Join(waitErr, accountingErr)
++						}
++						if status != uint32(windows.WAIT_OBJECT_0) && status != uint32(windows.WAIT_TIMEOUT) {
++							return errors.New("fixture original member wait returned an unexpected status")
++						}
++						if !native.now().Before(syncDeadline) {
++							return errors.New("fixture original signal/accounting synchronization expired")
++						}
++						if status == uint32(windows.WAIT_OBJECT_0) && info.ActiveProcesses == 0 {
++							nativeSignalReceived = true
++							return nil
++						}
++						pause := time.Millisecond
++						if remaining := syncDeadline.Sub(native.now()); remaining < pause {
++							pause = remaining
++						}
++						if pause > 0 {
++							native.sleep(pause)
++						}
++					}
++				},
++				now:   func() time.Time { return clock },
++				sleep: func(delay time.Duration) { clock = clock.Add(delay) },
++				wait: func(h windows.Handle) (uint32, error) {
++					if firstWait.IsZero() {
++						firstWait = clock
++					}
++					if clock.Sub(firstWait) < tc.delay {
++						return uint32(windows.WAIT_TIMEOUT), nil
++					}
++					status, waitErr := windows.WaitForSingleObject(h, 0)
++					if waitErr == nil && status == uint32(windows.WAIT_OBJECT_0) {
++						realSignaled = true
++					}
++					return status, waitErr
++				},
++			}
+ 			ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+ 			defer cancel()
+ 			result, runErr := runStrictlyContainedWithJob(ctx, StrictRunInvocation{Command: cmd, InputLimit: 1, StdoutLimit: 1024, StderrLimit: 1024}, job)
+@@ -123,6 +173,9 @@
+ 			if !errors.As(runErr, &strict) || strict.Kind != StrictRunTimeout || !errors.Is(runErr, context.DeadlineExceeded) {
+ 				t.Fatalf("timeout contract=%v", runErr)
+ 			}
++			if !nativeSignalReceived {
++				t.Fatalf("fixture lacked a real original member signal: %v", runErr)
++			}
+ 			if (result.SettledExit != nil) != tc.want {
+ 				t.Fatalf("positive fact=%+v want=%v run=%v", result.SettledExit, tc.want, runErr)
+ 			}

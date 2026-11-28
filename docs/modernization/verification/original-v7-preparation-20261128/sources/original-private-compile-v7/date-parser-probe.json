@@ -1,0 +1,15 @@
+{
+  "schema": "original-private-date-parser-probe-v1",
+  "status": "PASS",
+  "powershell_version": "7.7.0",
+  "bindings_sha256": "1a4fa1f84632e73005919cbb0aa4dfda299fb96ec793b0ac2a74cce4fc052381",
+  "default_type": "System.DateTime",
+  "default_display": "11/28/2026 11:11:34",
+  "old_regex_accepted": false,
+  "string_type": "System.String",
+  "exact_literal": "2026-11-28T11:11:34Z",
+  "fixed_regex_accepted": true,
+  "child_processes_started": 0,
+  "source_or_cache_read": false,
+  "original_v6_gate_reclassified": false
+}

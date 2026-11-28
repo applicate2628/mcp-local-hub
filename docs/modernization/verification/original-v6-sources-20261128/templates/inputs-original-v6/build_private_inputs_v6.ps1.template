@@ -1,0 +1,227 @@
+#Requires -Version 7.0
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory=$true)][string]$RunRoot,
+    [Parameter(Mandatory=$true)][string]$BindingsPath,
+    [Parameter(Mandatory=$true)][ValidatePattern('^[0-9a-f]{64}$')][string]$BindingsSHA256
+)
+$ErrorActionPreference = 'Stop'
+$taskRoot = '@@RECOVERY_WORK_AREA_RAW@@\mcp-acceptance-rebuild-20261127-v1'
+function Get-ExactHash([string]$Path) {
+    $stream=[IO.File]::OpenRead($Path); $hash=[Security.Cryptography.SHA256]::Create()
+    try { return [Convert]::ToHexString($hash.ComputeHash($stream)).ToLowerInvariant() }
+    finally { $stream.Dispose(); $hash.Dispose() }
+}
+function Require-Pin([object]$Pair) {
+    if ($Pair.path -isnot [string] -or $Pair.sha256 -cnotmatch '^[0-9a-f]{64}$' -or
+        (Get-ExactHash $Pair.path) -cne $Pair.sha256) { throw 'Explicit original input pin differs' }
+    return [string]$Pair.path
+}
+function Require-Ordinary([string]$Path,[bool]$Directory) {
+    $item=Get-Item -LiteralPath $Path -Force
+    if ([bool]$item.PSIsContainer -ne $Directory) { throw "Path kind differs: $Path" }
+    while ($null -ne $item) {
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Reparse source refused' }
+        if ($item -is [IO.FileInfo]) { $item=$item.Directory } else { $item=$item.Parent }
+    }
+}
+function Write-NewBytes([string]$Path,[byte[]]$Bytes) {
+    $stream=[IO.File]::Open($Path,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+    try { $stream.Write($Bytes,0,$Bytes.Length); $stream.Flush($true) } finally { $stream.Dispose() }
+}
+function Write-NewJson([string]$Path,[object]$Value) {
+    Write-NewBytes $Path ([Text.UTF8Encoding]::new($false).GetBytes(($Value | ConvertTo-Json -Depth 40)+[char]10))
+}
+function Artifact([string]$Path) { return [ordered]@{path=$Path;sha256=(Get-ExactHash $Path)} }
+$null=Require-Pin ([ordered]@{path=$BindingsPath;sha256=$BindingsSHA256})
+$cfg=[IO.File]::ReadAllText($BindingsPath) | ConvertFrom-Json -AsHashtable
+$RunRoot=[IO.Path]::GetFullPath($RunRoot)
+if ($cfg.schema -cne 'original-private-build-inputs-v6' -or $cfg.reviewed -cne $true -or
+    $RunRoot -cne (Join-Path $taskRoot 'original-product-inputs-v6') -or
+    $cfg.source_root -cne (Join-Path $taskRoot 'source-original3ebe-v2') -or
+    $cfg.source_commit -cne '3ebe335a2f666a5279d7fafc31a6f4dc3feedff4') { throw 'Exact fresh original build scope required' }
+Require-Ordinary $RunRoot $true
+# Only received physical metadata precedes reading original source or artifact bytes.
+foreach ($pair in $cfg.closed_producer_receipts) {
+    $null=Require-Pin $pair
+    $received=[IO.File]::ReadAllText($pair.path) | ConvertFrom-Json
+    if ($received.terminal_exit_received -cne $true -or $received.parent_capture_files_closed -cne $true -or
+        $received.physical_complete -cne $true) { throw 'Original producer physical completion is unreceived' }
+}
+if (@($cfg.closed_producer_receipts).Count -eq 0) { throw 'Closed producer metadata is required' }
+$goTool=Require-Pin $cfg.tools.go
+$pythonTool=Require-Pin $cfg.tools.python
+$validator=Require-Pin $cfg.tools.validator
+$winps=Require-Pin $cfg.tools.winps
+$scopeHelper=Require-Pin $cfg.scope_helper
+$graphHelper=Require-Pin $cfg.graph_helper
+$utf8Loader=Require-Pin $cfg.utf8_loader
+$sourceSnapshotInput=Require-Pin $cfg.source_snapshot
+$productFixture=Require-Pin $cfg.product_fixture
+$cacheSeed=Require-Pin $cfg.cache_seed
+foreach ($pair in $cfg.preparation_tools.Values) { $null=Require-Pin $pair }
+foreach ($pair in $cfg.input_files) { $null=Require-Pin $pair }
+if ($cfg.release_version -cne '0.4.60' -or $cfg.release_build_date -cnotmatch '^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$') {
+    throw 'Concrete reviewed release version/date required'
+}
+$table=[IO.File]::ReadAllText($sourceSnapshotInput) | ConvertFrom-Json -AsHashtable
+if ($table.schema -cne 'reused-graphify-source-snapshot-v1' -or $table.files.Count -ne 3508) {
+    throw 'Complete original 3ebe source snapshot required'
+}
+$source=Join-Path $RunRoot 'source'
+$snapshot=Join-Path $RunRoot 'source-snapshot.json'
+$imagesRoot=Join-Path $RunRoot 'publisher-test-images'
+foreach ($path in @($source,$snapshot,$imagesRoot)) { if (Test-Path -LiteralPath $path) { throw 'Fresh build output already exists' } }
+New-Item -ItemType Directory -Path $source | Out-Null
+New-Item -ItemType Directory -Path $imagesRoot | Out-Null
+foreach ($relative in @($table.files.Keys | Sort-Object)) {
+    if ([IO.Path]::IsPathRooted($relative) -or @($relative -split '[/\\]') -contains '..') { throw 'Unclean source snapshot path' }
+    $from=Join-Path $cfg.source_root $relative; $to=Join-Path $source $relative
+    Require-Ordinary $from $false
+    if ((Get-ExactHash $from) -cne $table.files[$relative].sha256) { throw "Original source bytes differ: $relative" }
+    $parent=[IO.Path]::GetDirectoryName($to)
+    [IO.Directory]::CreateDirectory($parent) | Out-Null
+    [IO.File]::Copy($from,$to,$false)
+    if ((Get-ExactHash $from) -cne $table.files[$relative].sha256 -or
+        (Get-ExactHash $to) -cne $table.files[$relative].sha256) { throw 'Independent source copy changed' }
+}
+[IO.File]::Copy($sourceSnapshotInput,$snapshot,$false)
+$sourceBuild=Join-Path $source 'build.ps1'
+if ((Get-ExactHash $sourceBuild) -cne '5038e339e55b4dcc4b2fca3d1231790c00a833431bb3608826ce74d4bca8c9f6') {
+    throw 'Original reviewed diagnostic builder changed'
+}
+$lanes=@(
+    [ordered]@{name='default';lane='default';tagged=$false;evidence=$cfg.evidence_parents.default},
+    [ordered]@{name='state';lane='test_state_path_env';tagged=$true;evidence=$cfg.evidence_parents.state}
+)
+foreach ($lane in $lanes) {
+    if ([IO.Path]::GetDirectoryName($lane.evidence) -cne '@@RECOVERY_WORK_AREA_RAW@@' -or
+        $lane.evidence.Length -gt 31 -or (Test-Path -LiteralPath $lane.evidence)) { throw 'Fresh bounded evidence parent required' }
+}
+$records=[ordered]@{}
+Push-Location -LiteralPath $source
+try {
+    $beforeRows=@(& $validator --source-root $source --source-snapshot $snapshot)
+    if ($LASTEXITCODE -ne 0) { throw 'Copied source validation failed' }
+    $before=($beforeRows -join [char]10) | ConvertFrom-Json -AsHashtable
+    Write-NewJson (Join-Path $RunRoot 'source-validation-before.json') $before
+    foreach ($lane in $lanes) {
+        $compiler=Join-Path $RunRoot ('compiler-inputs-'+$lane.lane)
+        if (Test-Path -LiteralPath $compiler) { throw 'Fresh compiler inputs required' }
+        $builderArguments=@('-NoLogo','-NoProfile','-File',$utf8Loader,'-SourcePath',$sourceBuild,
+            '-SourceSHA256','5038e339e55b4dcc4b2fca3d1231790c00a833431bb3608826ce74d4bca8c9f6',
+            '-PrepareCLIPrivatePreparationInputs','-PrivateCLIPreparationLane',$lane.lane,
+            '-WindowsTargetArch','amd64','-OutputDirectory',$compiler,'-ReleaseVersion',$cfg.release_version,
+            '-ReleaseCommit',$cfg.source_commit,'-ReleaseBuildDate',$cfg.release_build_date,'-SourceSnapshotPath',$snapshot)
+        & $winps @builderArguments
+        if ($LASTEXITCODE -ne 0) { throw 'Original fresh private compiler issuance failed' }
+        $issuerPath=Join-Path $compiler 'cli-publisher-test-inputs.json'
+        $issued=[IO.File]::ReadAllText($issuerPath) | ConvertFrom-Json -AsHashtable
+        $expectedTags=if ($lane.tagged) { 'test_state_path_env' } else { '' }
+        $expectedFlags='-H windowsgui -X mcp-local-hub/internal/buildinfo.version='+$cfg.release_version+
+            ' -X mcp-local-hub/internal/buildinfo.commit='+$cfg.source_commit+
+            ' -X mcp-local-hub/internal/buildinfo.date='+$cfg.release_build_date+
+            ' -X mcp-local-hub/internal/buildinfo.publisherSourceEpoch='+$before.source_epoch
+        if ($issued.schema -cne 'windows-cli-publisher-test-inputs-v1' -or $issued.prepared -cne $true -or
+            $issued.purpose -cne 'private-serena-migration-integration' -or $issued.role -cne 'publisher-test' -or
+            $issued.sourceRoot -cne $source -or $issued.sourceSnapshotPath -cne $snapshot -or
+            $issued.commit -cne $cfg.source_commit -or $issued.package -cne './internal/cli' -or
+            $issued.goEntrypoint -cne 'mcp-local-hub/internal/cli.test' -or
+            $issued.stagedResource -cne 'internal/cli/zz_publisher_test_versioninfo.syso' -or
+            (@($issued.buildTags) -join ',') -cne $expectedTags -or $issued.ldflags -cne $expectedFlags -or
+            $issued.publisherSource.source_epoch -cne $before.source_epoch -or
+            $issued.publisherSource.source_snapshot_sha256 -cne (Get-ExactHash $snapshot) -or
+            $issued.publisherSource.file_count -ne 3508) { throw 'Fresh issued compiler role/source/lane differs' }
+        $null=Require-Pin ([ordered]@{path=$issued.resourcePath;sha256=$issued.resourceSHA256})
+        $staged=Join-Path $source $issued.stagedResource
+        if (Test-Path -LiteralPath $staged) { throw 'Unowned existing compiler resource' }
+        $closure=[ordered]@{}
+        $flags=@('-ldflags',$issued.ldflags)
+        if ($lane.tagged) { $flags+=@('-tags','test_state_path_env') }
+        foreach ($stage in @('before','staged')) {
+            if ($stage -ceq 'staged') { [IO.File]::Copy($issued.resourcePath,$staged,$false) }
+            $graphPath=Join-Path $RunRoot ($lane.name+'-go-inputs-'+$stage+'.json')
+            $graphArgs=@('list')+$flags+@('-deps','-test','-json','./internal/cli')
+            $graphRows=@(& $goTool @graphArgs)
+            if ($LASTEXITCODE -ne 0) { throw 'Original Go declared test input production failed' }
+            Write-NewBytes $graphPath ([Text.UTF8Encoding]::new($false).GetBytes(($graphRows -join [char]10)+[char]10))
+            $closurePath=Join-Path $RunRoot ($lane.name+'-closure-'+$stage+'.json')
+            $receiveArgs=@('-I','-S','-B',$graphHelper,'--source',$source,'--snapshot',$snapshot,
+                '--snapshot-sha256',(Get-ExactHash $snapshot),'--graph',$graphPath,'--graph-sha256',(Get-ExactHash $graphPath),
+                '--output',$closurePath)
+            if ($stage -ceq 'staged') { $receiveArgs+=@('--resource-sha256',$issued.resourceSHA256) }
+            $receivedRows=@(& $pythonTool @receiveArgs)
+            if ($LASTEXITCODE -ne 0) { throw 'Original Go test input closure receiving failed' }
+            $closure[$stage]=($receivedRows -join [char]10) | ConvertFrom-Json -AsHashtable
+        }
+        if ($closure.before.generated_main.sha256 -cne $closure.staged.generated_main.sha256) {
+            throw 'Resource-only staging changed the generated Go test program'
+        }
+        $testmain=Join-Path $RunRoot ($lane.name+'-generated-testmain.go')
+        [IO.File]::Copy($closure.staged.generated_main.path,$testmain,$false)
+        if ((Get-ExactHash $testmain) -cne $closure.staged.generated_main.sha256) { throw 'Retained generated test program differs' }
+        $image=Join-Path $imagesRoot ('cli-publisher-'+$lane.name+'.test.exe')
+        $goArguments=@('test','-c','-o',$image)+$flags+@('./internal/cli')
+        & $goTool @goArguments
+        if ($LASTEXITCODE -ne 0) { throw 'Private publisher compilation failed; no tests were executed' }
+        $null=Require-Pin ([ordered]@{path=$staged;sha256=$issued.resourceSHA256})
+        $preserved=Join-Path $RunRoot ('publisher-'+$lane.name+'.resource.syso')
+        [IO.File]::Copy($staged,$preserved,$false)
+        $trashDir=Join-Path '@@RECOVERY_WORK_AREA_RAW@@\trash' ('publisher-v6-'+[Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $trashDir | Out-Null
+        $trashed=Join-Path $trashDir 'zz_publisher_test_versioninfo.syso'
+        [IO.File]::Move($staged,$trashed)
+        $null=Require-Pin ([ordered]@{path=$preserved;sha256=$issued.resourceSHA256})
+        $null=Require-Pin ([ordered]@{path=$trashed;sha256=$issued.resourceSHA256})
+        Write-NewJson (Join-Path $RunRoot ('resource-restoration-'+$lane.name+'.json')) ([ordered]@{
+            source=$staged;preserved=$preserved;trash=$trashed;sha256=$issued.resourceSHA256
+        })
+        $metadataRows=@(& $goTool version -m -json $image)
+        if ($LASTEXITCODE -ne 0) { throw 'Actual compiled private image metadata is unavailable' }
+        $metadata=($metadataRows -join [char]10) | ConvertFrom-Json -AsHashtable
+        $settings=@{}; foreach ($setting in $metadata.Settings) { $settings[$setting.Key]=[string]$setting.Value }
+        if ($metadata.Path -cne $issued.goEntrypoint -or $settings['-ldflags'] -cne $issued.ldflags -or
+            [string]$settings['-tags'] -cne $expectedTags -or $settings['GOOS'] -cne 'windows' -or
+            $settings['GOARCH'] -cne 'amd64') { throw 'Actual private image differs from fresh issued inputs' }
+        $metadataPath=Join-Path $RunRoot ('publisher-'+$lane.name+'-go-build-info.json')
+        Write-NewJson $metadataPath $metadata
+        $scopeRows=@(& $pythonTool -I -S -B $scopeHelper --create ([IO.Path]::GetFileName($lane.evidence)))
+        if ($LASTEXITCODE -ne 0) { throw 'Fresh private evidence parent creation failed' }
+        $security=($scopeRows -join [char]10) | ConvertFrom-Json -AsHashtable
+        if ($security.scope -cne $lane.evidence -or @($security.directories).Count -ne 1 -or
+            $security.directories[0].created_exclusively -cne $true -or
+            $security.directories[0].dacl_protected -cne $true -or
+            @(Get-ChildItem -LiteralPath $lane.evidence -Force).Count -ne 0) { throw 'Private evidence scope differs' }
+        $securityPath=Join-Path $RunRoot ('evidence-parent-'+$lane.name+'.json')
+        Write-NewJson $securityPath $security
+        $input=[ordered]@{
+            schema='private-serena-migration-input-v1';purpose='private-serena-migration-integration'
+            source_root=$source;source_epoch=$issued.publisherSource.source_epoch;source_commit=$cfg.source_commit
+            test_state_path_env=$lane.tagged;image=(Artifact $image);product_fixture=(Artifact $productFixture)
+            catalog=(Artifact (Join-Path $source 'servers\serena\manifest.yaml'))
+            uv=$cfg.preparation_tools.uv;uvx=$cfg.preparation_tools.uvx;python=$cfg.preparation_tools.python
+            issuance_receipt=(Artifact $issuerPath);evidence_parent=$lane.evidence;cache_seed=$cfg.cache_seed
+        }
+        $inputPath=Join-Path $RunRoot ('migration-'+$lane.name+'-input.json')
+        Write-NewJson $inputPath $input
+        $records[$lane.name]=[ordered]@{
+            input=(Artifact $inputPath);image=$input.image;issuer=$input.issuance_receipt
+            evidence_parent=$lane.evidence;evidence_creation=(Artifact $securityPath)
+            compiler_argv=@($goTool)+$goArguments;issuer_argv=@($winps)+$builderArguments
+            generated_main=(Artifact $testmain);closures=$closure;build_info=(Artifact $metadataPath)
+        }
+    }
+    $afterRows=@(& $validator --source-root $source --source-snapshot $snapshot)
+    if ($LASTEXITCODE -ne 0) { throw 'Private source final validation failed' }
+    $after=($afterRows -join [char]10) | ConvertFrom-Json -AsHashtable
+    Write-NewJson (Join-Path $RunRoot 'source-validation-after.json') $after
+    if (($before | ConvertTo-Json -Depth 20 -Compress) -cne ($after | ConvertTo-Json -Depth 20 -Compress)) {
+        throw 'Compiler preparation changed the exact original private source'
+    }
+    Write-NewJson (Join-Path $RunRoot 'private-publisher-inputs.json') ([ordered]@{
+        schema='original-private-publisher-inputs-v6';status='COMPILED_INPUTS_ONLY';source_commit=$cfg.source_commit
+        source_root=$source;source_snapshot=(Artifact $snapshot);publisher_source=$before;inputs=$records
+        source_restored=$true;tests_executed=$false;bindings=(Artifact $BindingsPath)
+        scope='Separate 3ebe publisher images for14 migration child roots. Literal incoming727d Go image is independently compiled by unchanged mandatory commands.'
+    })
+} finally { Pop-Location }
