@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "source_head": "1b870e04f58bbf60fde2d2339fcd4ae9b50b24c3",
+  "probe_sha256": "c618d809208ffa0be23b8c27bd26c0ee0c825faf981bed0310ca8b16ee809650",
+  "probe_executable_sha256": "b97b069c42cc56ef632962864495b10482f886e94a12ea2a0335a9ba4a7d3bfc",
+  "runner_sha256": "7f2b35cfdba2bd1b726920bb49c1bf9fbe3aa9b0bf556e6a10d54e4340c290f1",
+  "launcher": {
+    "runner_exit_code": 1,
+    "completed_utc": "2026-11-19T18:23:30.020841+00:00",
+    "runner_sha256": "7f2b35cfdba2bd1b726920bb49c1bf9fbe3aa9b0bf556e6a10d54e4340c290f1"
+  },
+  "remote_source_files": {
+    "execution": {
+      "bytes": 5128,
+      "sha256": "11e3f401b38a4c19e00000c64255070495de2e08fec450592c2a955a9e65b5b3"
+    },
+    "probe_stdout": {
+      "bytes": 270,
+      "sha256": "1bc5ca1d7a514f477dfd4c168d63dfbfb9d0804f5f444a30850adfb07455d8cb"
+    },
+    "launcher": {
+      "bytes": 170,
+      "sha256": "1de2ae473347396701f72105bce7278aaa2d6ceefc8d78b6cc314014726b3eb3"
+    }
+  },
+  "empty_input_control": {
+    "expected_exit_code": 1,
+    "observed_exit_code": 1,
+    "events": 2,
+    "backend_not_reached_by_control_flow": true,
+    "api_results": 0,
+    "positive_fixture_executed": false
+  },
+  "notes": [
+    "The nonzero probe and runner result is retained exactly; it is the intended missing-input guard.",
+    "The positive Go executable was built from the pinned source checkout; no Windows tasks were created.",
+    "PowerShell fixture admission and execution require separate review and explicit authorization."
+  ]
+}

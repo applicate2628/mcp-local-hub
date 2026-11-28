@@ -1,0 +1,457 @@
+{
+  "observed_utc": "2026-11-21 11:35:11 UTC",
+  "scope": "26 open PRs after donor closures; prior to audit commit; plan head changed after queue snapshot",
+  "records": [
+    {
+      "pr": 660,
+      "head_at_queue_snapshot": "610fb30348c10be7b645b6ce43c862397b190f60",
+      "reviews": [
+        {
+          "id": 5969075719,
+          "state": "COMMENTED",
+          "commit": "1b870e04f58bbf60fde2d2339fcd4ae9b50b24c3",
+          "submitted_at": "2026-11-19T03:54:03Z",
+          "author": "applicate2628"
+        }
+      ]
+    },
+    {
+      "pr": 659,
+      "head_at_queue_snapshot": "a3568dfe3426afaca4176d57a2310097e5214e77",
+      "reviews": [
+        {
+          "id": 5965249309,
+          "state": "COMMENTED",
+          "commit": "a3568dfe3426afaca4176d57a2310097e5214e77",
+          "submitted_at": "2026-11-18T21:12:08Z",
+          "author": "applicate2628"
+        }
+      ]
+    },
+    {
+      "pr": 658,
+      "head_at_queue_snapshot": "cf5a3b11eab69e968ae1efeeaf2016b5a7a990b6",
+      "reviews": [
+        {
+          "id": 5955451043,
+          "state": "COMMENTED",
+          "commit": "c0ea2b1d4eec3ef35621cb0dfaa309204a475b7a",
+          "submitted_at": "2026-11-18T11:11:07Z",
+          "author": "applicate2628"
+        },
+        {
+          "id": 5956900005,
+          "state": "COMMENTED",
+          "commit": "56f601712950c99f4f98f0662a1694c2964d5ebf",
+          "submitted_at": "2026-11-18T12:53:04Z",
+          "author": "applicate2628"
+        },
+        {
+          "id": 5963809766,
+          "state": "COMMENTED",
+          "commit": "c150ab5cfb59815ce827ad9bfbe46a0b9a405f27",
+          "submitted_at": "2026-11-18T19:43:56Z",
+          "author": "applicate2628"
+        },
+        {
+          "id": 5965365697,
+          "state": "COMMENTED",
+          "commit": "3c6ef9378950f57bb654e80592be7f8e0e4e22de",
+          "submitted_at": "2026-11-18T21:21:09Z",
+          "author": "applicate2628"
+        },
+        {
+          "id": 5966282589,
+          "state": "COMMENTED",
+          "commit": "539f984ab97bc3f2d389d337d30caa9f9b52e209",
+          "submitted_at": "2026-11-18T22:33:39Z",
+          "author": "applicate2628"
+        },
+        {
+          "id": 5967545927,
+          "state": "COMMENTED",
+          "commit": "bafd67045d6b867709087cff95b7806f0f6d279c",
+          "submitted_at": "2026-11-19T00:43:01Z",
+          "author": "applicate2628"
+        },
+        {
+          "id": 5969167931,
+          "state": "COMMENTED",
+          "commit": "cf7b4b072693ce96b671c1a81e71a6573a0b354c",
+          "submitted_at": "2026-11-19T04:07:07Z",
+          "author": "applicate2628"
+        }
+      ]
+    },
+    {
+      "pr": 657,
+      "head_at_queue_snapshot": "4fa52b60b719664ede441be339e196a8b9766c50",
+      "reviews": [
+        {
+          "id": 5961115872,
+          "state": "COMMENTED",
+          "commit": "4fa52b60b719664ede441be339e196a8b9766c50",
+          "submitted_at": "2026-11-18T16:48:01Z",
+          "author": "applicate2628"
+        }
+      ]
+    },
+    {
+      "pr": 655,
+      "head_at_queue_snapshot": "2defe618259f7db4144824d19927b032300d160d",
+      "reviews": [
+        {
+          "id": 5959916312,
+          "state": "COMMENTED",
+          "commit": "2defe618259f7db4144824d19927b032300d160d",
+          "submitted_at": "2026-11-18T15:43:14Z",
+          "author": "applicate2628"
+        }
+      ]
+    },
+    {
+      "pr": 654,
+      "head_at_queue_snapshot": "d01fb6e73013d6a47628b1a9cbecd2d5f3b8e32c",
+      "reviews": [
+        {
+          "id": 5959915844,
+          "state": "COMMENTED",
+          "commit": "d01fb6e73013d6a47628b1a9cbecd2d5f3b8e32c",
+          "submitted_at": "2026-11-18T15:43:13Z",
+          "author": "applicate2628"
+        }
+      ]
+    },
+    {
+      "pr": 653,
+      "head_at_queue_snapshot": "90fd6f69ea4a59856375e29b34cebf4953cb2ff4",
+      "reviews": [
+        {
+          "id": 5959915445,
+          "state": "COMMENTED",
+          "commit": "90fd6f69ea4a59856375e29b34cebf4953cb2ff4",
+          "submitted_at": "2026-11-18T15:43:12Z",
+          "author": "applicate2628"
+        }
+      ]
+    },
+    {
+      "pr": 652,
+      "head_at_queue_snapshot": "b079e4c9503f080d8ab09742270c89a3bf88d7d5",
+      "reviews": [
+        {
+          "id": 5959531154,
+          "state": "COMMENTED",
+          "commit": "b079e4c9503f080d8ab09742270c89a3bf88d7d5",
+          "submitted_at": "2026-11-18T15:22:59Z",
+          "author": "applicate2628"
+        }
+      ]
+    },
+    {
+      "pr": 650,
+      "head_at_queue_snapshot": "2a273c10f6e5c0651e89860f88ef0b6a0e3748ef",
+      "reviews": [
+        {
+          "id": 5959915031,
+          "state": "COMMENTED",
+          "commit": "686a54c0efbe9f99cb6ffa8d6480b289c6f465bf",
+          "submitted_at": "2026-11-18T15:43:11Z",
+          "author": "applicate2628"
+        }
+      ]
+    },
+    {
+      "pr": 649,
+      "head_at_queue_snapshot": "73caa97a860f1eaec205ec84c1502c47ce05cdc0",
+      "reviews": [
+        {
+          "id": 5959655594,
+          "state": "COMMENTED",
+          "commit": "73caa97a860f1eaec205ec84c1502c47ce05cdc0",
+          "submitted_at": "2026-11-18T15:29:36Z",
+          "author": "applicate2628"
+        }
+      ]
+    },
+    {
+      "pr": 648,
+      "head_at_queue_snapshot": "fc4dc5c7145e4f4d709b91654ab4bc1fd7abe259",
+      "reviews": [
+        {
+          "id": 5959530461,
+          "state": "COMMENTED",
+          "commit": "fc4dc5c7145e4f4d709b91654ab4bc1fd7abe259",
+          "submitted_at": "2026-11-18T15:22:57Z",
+          "author": "applicate2628"
+        }
+      ]
+    },
+    {
+      "pr": 647,
+      "head_at_queue_snapshot": "dca92972e90c5280e6c217409acfc6fd0dfb38ea",
+      "reviews": [
+        {
+          "id": 5959655249,
+          "state": "COMMENTED",
+          "commit": "6de482cdd09034f71b5e091cc9e385e229cd96a2",
+          "submitted_at": "2026-11-18T15:29:35Z",
+          "author": "applicate2628"
+        }
+      ]
+    },
+    {
+      "pr": 646,
+      "head_at_queue_snapshot": "1df32782e7ade719e1d7f8c6153b4455a6ea740a",
+      "reviews": [
+        {
+          "id": 5959654873,
+          "state": "COMMENTED",
+          "commit": "1df32782e7ade719e1d7f8c6153b4455a6ea740a",
+          "submitted_at": "2026-11-18T15:29:34Z",
+          "author": "applicate2628"
+        }
+      ]
+    },
+    {
+      "pr": 644,
+      "head_at_queue_snapshot": "1cf5754b81c850a3569be269642b49605895eeb2",
+      "reviews": [
+        {
+          "id": 5962472237,
+          "state": "COMMENTED",
+          "commit": "1cf5754b81c850a3569be269642b49605895eeb2",
+          "submitted_at": "2026-11-18T18:14:44Z",
+          "author": "applicate2628"
+        }
+      ]
+    },
+    {
+      "pr": 643,
+      "head_at_queue_snapshot": "44f9a3a9332c716fcd5dba5c7098df5cbf1d3c60",
+      "reviews": [
+        {
+          "id": 5956820088,
+          "state": "COMMENTED",
+          "commit": "527574928335142d95bc073c6ca4459fef9f9f90",
+          "submitted_at": "2026-11-18T12:48:26Z",
+          "author": "applicate2628"
+        }
+      ]
+    },
+    {
+      "pr": 637,
+      "head_at_queue_snapshot": "1ebe00c5dbac448488d980072e689b1126875dde",
+      "reviews": []
+    },
+    {
+      "pr": 635,
+      "head_at_queue_snapshot": "f639b97ccc56eb18d314d52951d1b5d167d11e5f",
+      "reviews": [
+        {
+          "id": 5906685016,
+          "state": "COMMENTED",
+          "commit": "65c0e7388aaa8c1861c1ca83470fe2a537898d09",
+          "submitted_at": "2026-11-14T19:21:00Z",
+          "author": "chatgpt-codex-connector[bot]"
+        },
+        {
+          "id": 5906756908,
+          "state": "COMMENTED",
+          "commit": "6ca53c83aa4f8ccca9bc0eae3d91f3fff9ede109",
+          "submitted_at": "2026-11-14T19:40:31Z",
+          "author": "applicate2628"
+        },
+        {
+          "id": 5906756996,
+          "state": "COMMENTED",
+          "commit": "6ca53c83aa4f8ccca9bc0eae3d91f3fff9ede109",
+          "submitted_at": "2026-11-14T19:40:33Z",
+          "author": "applicate2628"
+        }
+      ]
+    },
+    {
+      "pr": 632,
+      "head_at_queue_snapshot": "ff4ba7f85fef35e19b39dced17d9df47bb9237a0",
+      "reviews": [
+        {
+          "id": 5961115560,
+          "state": "COMMENTED",
+          "commit": "ff4ba7f85fef35e19b39dced17d9df47bb9237a0",
+          "submitted_at": "2026-11-18T16:48:00Z",
+          "author": "applicate2628"
+        }
+      ]
+    },
+    {
+      "pr": 631,
+      "head_at_queue_snapshot": "412cd353d495a890b47992c0eae672a247862508",
+      "reviews": [
+        {
+          "id": 5948270182,
+          "state": "COMMENTED",
+          "commit": "2fd3f017a9e5ccd0460293d71ea34aceb62f245e",
+          "submitted_at": "2026-11-17T23:17:46Z",
+          "author": "applicate2628"
+        },
+        {
+          "id": 5962471640,
+          "state": "COMMENTED",
+          "commit": "ebfa4ef32b57cfa022acdcfcb4a2745f32b815c6",
+          "submitted_at": "2026-11-18T18:14:42Z",
+          "author": "applicate2628"
+        }
+      ]
+    },
+    {
+      "pr": 629,
+      "head_at_queue_snapshot": "b3646f19706d795a8b0c0dafb2193d7dc6f4c584",
+      "reviews": [
+        {
+          "id": 5961299828,
+          "state": "COMMENTED",
+          "commit": "e07dc80fe737e8e0c17d639f24a0c9a3581e037c",
+          "submitted_at": "2026-11-18T16:58:18Z",
+          "author": "applicate2628"
+        }
+      ]
+    },
+    {
+      "pr": 628,
+      "head_at_queue_snapshot": "00f120a533f0e0e4bc7b6a56871528ff6dd9fde4",
+      "reviews": [
+        {
+          "id": 5962471074,
+          "state": "COMMENTED",
+          "commit": "9c2ae02bc1c3a5cf2e1fcd16101043d63bbd6fd9",
+          "submitted_at": "2026-11-18T18:14:40Z",
+          "author": "applicate2628"
+        },
+        {
+          "id": 5966200735,
+          "state": "COMMENTED",
+          "commit": "453e856347cabcebb289ec1c9af70f12af3376c0",
+          "submitted_at": "2026-11-18T22:27:22Z",
+          "author": "applicate2628"
+        },
+        {
+          "id": 5968784333,
+          "state": "COMMENTED",
+          "commit": "453e856347cabcebb289ec1c9af70f12af3376c0",
+          "submitted_at": "2026-11-19T03:12:24Z",
+          "author": "applicate2628"
+        }
+      ]
+    },
+    {
+      "pr": 627,
+      "head_at_queue_snapshot": "b827398ef127a1556b7b2bdcdcec7fe03fa6651d",
+      "reviews": [
+        {
+          "id": 5953798373,
+          "state": "COMMENTED",
+          "commit": "2c13114eabc7ad6cab416788b6e32faaa8c99935",
+          "submitted_at": "2026-11-18T09:25:33Z",
+          "author": "applicate2628"
+        },
+        {
+          "id": 5962470418,
+          "state": "COMMENTED",
+          "commit": "b827398ef127a1556b7b2bdcdcec7fe03fa6651d",
+          "submitted_at": "2026-11-18T18:14:38Z",
+          "author": "applicate2628"
+        }
+      ]
+    },
+    {
+      "pr": 626,
+      "head_at_queue_snapshot": "04e1e19650318725850225ebadc521cbf97dadd9",
+      "reviews": [
+        {
+          "id": 5962690160,
+          "state": "COMMENTED",
+          "commit": "04e1e19650318725850225ebadc521cbf97dadd9",
+          "submitted_at": "2026-11-18T18:28:37Z",
+          "author": "applicate2628"
+        }
+      ]
+    },
+    {
+      "pr": 625,
+      "head_at_queue_snapshot": "287a7772a4be75ed9fb2f9ba1feb68cf035ed907",
+      "reviews": [
+        {
+          "id": 5962469822,
+          "state": "COMMENTED",
+          "commit": "287a7772a4be75ed9fb2f9ba1feb68cf035ed907",
+          "submitted_at": "2026-11-18T18:14:35Z",
+          "author": "applicate2628"
+        }
+      ]
+    },
+    {
+      "pr": 624,
+      "head_at_queue_snapshot": "81dcf67db013ba2879878c2ee6fe07aa0bb4aec3",
+      "reviews": [
+        {
+          "id": 5962469263,
+          "state": "COMMENTED",
+          "commit": "251fb4f03405ba438662976137afec0d9c27105e",
+          "submitted_at": "2026-11-18T18:14:33Z",
+          "author": "applicate2628"
+        }
+      ]
+    },
+    {
+      "pr": 623,
+      "head_at_queue_snapshot": "0fac6a5e992ec8b4937bad9fa7d71e64d711b3af",
+      "reviews": [
+        {
+          "id": 5962468737,
+          "state": "COMMENTED",
+          "commit": "9e948c92047d5b05419f01983ed743e358a79989",
+          "submitted_at": "2026-11-18T18:14:30Z",
+          "author": "applicate2628"
+        },
+        {
+          "id": 5963809570,
+          "state": "COMMENTED",
+          "commit": "385d0ae7a58012001ec06ebddc658bcd90c1fd18",
+          "submitted_at": "2026-11-18T19:43:55Z",
+          "author": "applicate2628"
+        },
+        {
+          "id": 5965331371,
+          "state": "COMMENTED",
+          "commit": "7feec21c87760afa3900193974b1d3c71e97dcc1",
+          "submitted_at": "2026-11-18T21:18:28Z",
+          "author": "applicate2628"
+        },
+        {
+          "id": 5966233562,
+          "state": "COMMENTED",
+          "commit": "1e04fea613edc909b13c19f8dad4db5977b3bd69",
+          "submitted_at": "2026-11-18T22:29:37Z",
+          "author": "applicate2628"
+        },
+        {
+          "id": 5967529814,
+          "state": "COMMENTED",
+          "commit": "e8268f067a7fbf797b55352ec601ae8d6b5e41f2",
+          "submitted_at": "2026-11-19T00:41:01Z",
+          "author": "applicate2628"
+        },
+        {
+          "id": 5969167690,
+          "state": "COMMENTED",
+          "commit": "e5df8f9e4002e55b521f509ca363e348e300d8ad",
+          "submitted_at": "2026-11-19T04:07:05Z",
+          "author": "applicate2628"
+        }
+      ]
+    }
+  ],
+  "total": 42,
+  "approved": 0
+}

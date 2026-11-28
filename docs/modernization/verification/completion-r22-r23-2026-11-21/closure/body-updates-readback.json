@@ -1,0 +1,146 @@
+{
+  "schema": 1,
+  "repository": "applicate2628/mcp-local-hub",
+  "evidence_commit": "b1d932ea8925ef3324d539e5de006daeae65ba2a",
+  "plan_commit": "cf5a3b11eab69e968ae1efeeaf2016b5a7a990b6",
+  "scope": "Eight existing PR descriptions only; no comments or reviews submitted.",
+  "guard": "Exact original body compared immediately before each update; the body API does not provide atomic compare-and-swap.",
+  "updates": [
+    {
+      "number": 624,
+      "head_sha": "81dcf67db013ba2879878c2ee6fe07aa0bb4aec3",
+      "head_branch": "perf/rx01-cmaketrace-benchmark-20261112",
+      "base_branch": "master",
+      "draft": true,
+      "state": "open",
+      "updated_at": "2026-11-21T10:05:19Z",
+      "original_body_sha256": "15c827ceca362e97765395ce99ef5585b6192e188bac885cea0ba92d62f0a30f",
+      "final_body_sha256": "ec0a2bb860c42c76366084dbb8bb8cdca05ec0e1cee9d19e16434879f088cf13",
+      "final_body_bytes": 18072,
+      "exact_body_readback": true,
+      "body_compare_and_swap_provided_by_api": false,
+      "fields_sent": [
+        "body"
+      ]
+    },
+    {
+      "number": 628,
+      "head_sha": "00f120a533f0e0e4bc7b6a56871528ff6dd9fde4",
+      "head_branch": "perf/rx16-native-observation-20261112",
+      "base_branch": "master",
+      "draft": true,
+      "state": "open",
+      "updated_at": "2026-11-21T10:05:23Z",
+      "original_body_sha256": "ab4f4fdc649578d8bad109ba3b5fbae73ae9cbb56ca9f5ab48e3c4fbdb52a1cd",
+      "final_body_sha256": "4034dc6e32f556d8a584c0b2b3e05ce5fcc259a1140e5e0b0d6c39710d5eef68",
+      "final_body_bytes": 12384,
+      "exact_body_readback": true,
+      "body_compare_and_swap_provided_by_api": false,
+      "fields_sent": [
+        "body"
+      ]
+    },
+    {
+      "number": 629,
+      "head_sha": "b3646f19706d795a8b0c0dafb2193d7dc6f4c584",
+      "head_branch": "fix/relay-output-failure-contract-20261113",
+      "base_branch": "master",
+      "draft": true,
+      "state": "open",
+      "updated_at": "2026-11-21T10:05:25Z",
+      "original_body_sha256": "3f8eadfd6ed9110a72cd39f0d454d01955e98f6069ea7baab89a1eda5a173aeb",
+      "final_body_sha256": "c47d664c51ab2307c752a17d2f2c8fb7f34be9c7167ff8f2a13af26cfe819888",
+      "final_body_bytes": 22586,
+      "exact_body_readback": true,
+      "body_compare_and_swap_provided_by_api": false,
+      "fields_sent": [
+        "body"
+      ]
+    },
+    {
+      "number": 631,
+      "head_sha": "2eb7c114103ef5c60939cd114110ebe667901166",
+      "head_branch": "spike/rx02-go-rust-boundary-20261113",
+      "base_branch": "spike/rx02-native-identity-20261114",
+      "draft": true,
+      "state": "open",
+      "updated_at": "2026-11-21T10:05:27Z",
+      "original_body_sha256": "d52f569d78b8c9560267a46958673b859c0657a21a15b54edf055f99ced185dc",
+      "final_body_sha256": "aee781278d06b8695e102de53c4979f3d5fb895115c2ee1cafb46fd0a78bcad9",
+      "final_body_bytes": 9489,
+      "exact_body_readback": true,
+      "body_compare_and_swap_provided_by_api": false,
+      "fields_sent": [
+        "body"
+      ]
+    },
+    {
+      "number": 637,
+      "head_sha": "2542d63d2f917dc414a387e0ed2ceb494d118cfe",
+      "head_branch": "fix/serena-integration-qualification-20261114",
+      "base_branch": "fix/serena-qualification-namespace-20261114",
+      "draft": true,
+      "state": "open",
+      "updated_at": "2026-11-21T10:05:29Z",
+      "original_body_sha256": "c78894a80e38b603a4c5d723d39de43f6764b3c1582b0e88df898a9cd1a5947d",
+      "final_body_sha256": "ae7c87951fa17d72965c7db412170a5269f0000f204e36b16e63cb43e35b8cac",
+      "final_body_bytes": 11038,
+      "exact_body_readback": true,
+      "body_compare_and_swap_provided_by_api": false,
+      "fields_sent": [
+        "body"
+      ]
+    },
+    {
+      "number": 658,
+      "head_sha": "cf5a3b11eab69e968ae1efeeaf2016b5a7a990b6",
+      "head_branch": "docs/agents-canonical-plan-20261117",
+      "base_branch": "master",
+      "draft": true,
+      "state": "open",
+      "updated_at": "2026-11-21T10:05:31Z",
+      "original_body_sha256": "c34411f3c0979f476196edafc03aeb1ded52a1534e408919d2bf1b5759a86a68",
+      "final_body_sha256": "9ecab04c9aaf7b77960af40931f31db138601792816297494cfeee09346e99cc",
+      "final_body_bytes": 45725,
+      "exact_body_readback": true,
+      "body_compare_and_swap_provided_by_api": false,
+      "fields_sent": [
+        "body"
+      ]
+    },
+    {
+      "number": 660,
+      "head_sha": "610fb30348c10be7b645b6ce43c862397b190f60",
+      "head_branch": "fix/scheduler-hidden-task-lookup-20261119",
+      "base_branch": "master",
+      "draft": true,
+      "state": "open",
+      "updated_at": "2026-11-21T10:05:34Z",
+      "original_body_sha256": "31a27cdef5cb48dc8dbe0b9e150719edc67de2c11c1ddf97eba3f8dc9e4e963a",
+      "final_body_sha256": "797db39a5d440dbf41d0883cc8e2474cd39c4e6fe4546fed12be4234377d74fb",
+      "final_body_bytes": 47768,
+      "exact_body_readback": true,
+      "body_compare_and_swap_provided_by_api": false,
+      "fields_sent": [
+        "body"
+      ]
+    },
+    {
+      "number": 623,
+      "head_sha": "b1d932ea8925ef3324d539e5de006daeae65ba2a",
+      "head_branch": "docs/rust-cross-platform-no-com-20261112",
+      "base_branch": "master",
+      "draft": true,
+      "state": "open",
+      "updated_at": "2026-11-21T10:05:36Z",
+      "original_body_sha256": "3bc288f1ecd3266f5ced07ed5f0f4b713501d709248f7af49ef8a06188b7e7c9",
+      "final_body_sha256": "1988051e0e57576cec4a3d5b18b09824e2c1c58e0e25a498b6221a705165bcfb",
+      "final_body_bytes": 50954,
+      "exact_body_readback": true,
+      "body_compare_and_swap_provided_by_api": false,
+      "fields_sent": [
+        "body"
+      ]
+    }
+  ]
+}

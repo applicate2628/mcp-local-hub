@@ -1,0 +1,18 @@
+{
+  "source_head": "1b870e04f58bbf60fde2d2339fcd4ae9b50b24c3",
+  "source_sha256": "e2594cbe0a0cca61038a09ea7d37a701132be378bec6b935236e8b4233ed43fa",
+  "corrected_fixture_sha256": "8118e1c02937dbf27a9aaa12f63f4e34a91b0ce3e7ad675b4e1758960c9cb010",
+  "change": "Remove only the extra nonempty-stderr failure predicate; preserve diagnostics, JSON parsing, semantic assertions, and cleanup rules",
+  "syntax_parse": {
+    "engine": "Windows PowerShell on Comet",
+    "syntax_errors": 0,
+    "messages": [],
+    "token_count": 2449,
+    "script_evaluated": false,
+    "process_completion_observed": true
+  },
+  "apply_executed": false,
+  "native_rerun_authorized": false,
+  "prior_native_attempt": "native-attempt-redacted.json",
+  "prior_failed_attempt_preserved": true
+}

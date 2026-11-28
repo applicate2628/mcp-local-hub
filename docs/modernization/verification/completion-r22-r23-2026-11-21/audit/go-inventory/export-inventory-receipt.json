@@ -1,0 +1,13 @@
+{
+  "started_utc": "2026-11-21T09:58:19.705298+00:00",
+  "completed": true,
+  "exporter_sha256": "ea5e025cc165c56197c56a83a3c305cbe52445fce25aab9c0b89c55f286428ee",
+  "archive": "D:\\dev\\ChatGPT\\mcp-r23-go-inventory-20261121\\public-inventory.zip",
+  "archive_bytes": 458328,
+  "archive_sha256": "82659ea033157a956eef8eb2a471d1fd6c734070d85e9679551bf978e5f78812",
+  "entries": 68,
+  "payload_hashes": 67,
+  "verified_original_command_streams": 50,
+  "public_hash_manifest_sha256": "0381d098d9e202e6befb64b705c0b5bdd6778ea7dd32a4a786576bbbb9343ff9",
+  "finished_utc": "2026-11-21T09:58:19.872350+00:00"
+}

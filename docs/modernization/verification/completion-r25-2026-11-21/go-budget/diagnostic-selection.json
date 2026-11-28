@@ -1,0 +1,221 @@
+{
+  "schema": "r25-go-budget-diagnostic-selection-v1",
+  "source_ref": "2d12d9b63e60387591d27515aef3487c0e3ea560",
+  "owner_ref_for_serena_qualification": "1ebe00c5dbac448488d980072e689b1126875dde",
+  "root": "TestMCPFrontV3_SerenaConflictClassifierMutationTable",
+  "package": "mcp-local-hub/internal/cli",
+  "relative_package": "./internal/cli",
+  "root_count": 1,
+  "case_count": 34,
+  "durable_case_count": 30,
+  "phases": {
+    "root": [
+      "journal-fixture",
+      "initial-attempt"
+    ],
+    "all_cases": [
+      "case-setup",
+      "classifier"
+    ],
+    "invalid_cases": [
+      "fixture-directory",
+      "fixture-write",
+      "read-validation",
+      "rollback-refusal"
+    ]
+  },
+  "expected_phase_records": 190,
+  "cases": [
+    {
+      "name": "fresh-authority-free-pinless",
+      "class": "mcpFrontSerenaConflictFreshAuthorityFreePinless",
+      "durable": false
+    },
+    {
+      "name": "retained-pinned-no-receipt",
+      "class": "mcpFrontSerenaConflictRetainedPinnedNoReceipt",
+      "durable": false
+    },
+    {
+      "name": "retained-prior-applied",
+      "class": "mcpFrontSerenaConflictRetainedPriorApplied",
+      "durable": false
+    },
+    {
+      "name": "applied-without-pin-is-invalid",
+      "class": "mcpFrontSerenaConflictInvalid",
+      "durable": true
+    },
+    {
+      "name": "retained-no-receipt-without-pin-is-invalid",
+      "class": "mcpFrontSerenaConflictInvalid",
+      "durable": true
+    },
+    {
+      "name": "prior-applied-receipt-removed-is-invalid",
+      "class": "mcpFrontSerenaConflictInvalid",
+      "durable": true
+    },
+    {
+      "name": "prior-applied-current-generation-is-invalid",
+      "class": "mcpFrontSerenaConflictInvalid",
+      "durable": true
+    },
+    {
+      "name": "prior-applied-post-state-is-invalid",
+      "class": "mcpFrontSerenaConflictInvalid",
+      "durable": true
+    },
+    {
+      "name": "nil-disposition-is-invalid",
+      "class": "mcpFrontSerenaConflictInvalid",
+      "durable": true
+    },
+    {
+      "name": "empty-disposition-is-invalid",
+      "class": "mcpFrontSerenaConflictInvalid",
+      "durable": true
+    },
+    {
+      "name": "baseline-only-disposition-is-invalid",
+      "class": "mcpFrontSerenaConflictInvalid",
+      "durable": true
+    },
+    {
+      "name": "restored-disposition-is-invalid",
+      "class": "mcpFrontSerenaConflictInvalid",
+      "durable": true
+    },
+    {
+      "name": "failed-disposition-is-invalid",
+      "class": "mcpFrontSerenaConflictInvalid",
+      "durable": true
+    },
+    {
+      "name": "unknown-disposition-is-invalid",
+      "class": "mcpFrontSerenaConflictInvalid",
+      "durable": true
+    },
+    {
+      "name": "wrong-conflict-reason-is-invalid",
+      "class": "mcpFrontSerenaConflictInvalid",
+      "durable": true
+    },
+    {
+      "name": "wrong-pending-reason-is-invalid",
+      "class": "mcpFrontSerenaConflictInvalid",
+      "durable": true
+    },
+    {
+      "name": "dependency-identity-is-invalid",
+      "class": "mcpFrontSerenaConflictInvalid",
+      "durable": true
+    },
+    {
+      "name": "surface-is-invalid",
+      "class": "mcpFrontSerenaConflictInvalid",
+      "durable": true
+    },
+    {
+      "name": "client-is-invalid",
+      "class": "mcpFrontSerenaConflictInvalid",
+      "durable": true
+    },
+    {
+      "name": "language-is-invalid",
+      "class": "mcpFrontSerenaConflictInvalid",
+      "durable": true
+    },
+    {
+      "name": "row-identity-is-invalid",
+      "class": "mcpFrontSerenaConflictInvalid",
+      "durable": true
+    },
+    {
+      "name": "baseline-marker-is-invalid",
+      "class": "mcpFrontSerenaConflictInvalid",
+      "durable": true
+    },
+    {
+      "name": "fresh-baseline-state-is-invalid",
+      "class": "mcpFrontSerenaConflictInvalid",
+      "durable": true
+    },
+    {
+      "name": "attempt-generation-is-invalid",
+      "class": "mcpFrontSerenaConflictInvalid",
+      "durable": true
+    },
+    {
+      "name": "attempt-operation-is-invalid",
+      "class": "mcpFrontSerenaConflictInvalid",
+      "durable": true
+    },
+    {
+      "name": "attempt-pre-state-is-invalid",
+      "class": "mcpFrontSerenaConflictInvalid",
+      "durable": true
+    },
+    {
+      "name": "attempt-intended-state-is-invalid",
+      "class": "mcpFrontSerenaConflictInvalid",
+      "durable": true
+    },
+    {
+      "name": "active-plan-generation-is-invalid",
+      "class": "mcpFrontSerenaConflictInvalid",
+      "durable": true
+    },
+    {
+      "name": "report-generation-is-invalid",
+      "class": "mcpFrontSerenaConflictInvalid",
+      "durable": true
+    },
+    {
+      "name": "active-plan-row-key-is-invalid",
+      "class": "mcpFrontSerenaConflictInvalid",
+      "durable": true
+    },
+    {
+      "name": "active-plan-operation-is-invalid",
+      "class": "mcpFrontSerenaConflictInvalid",
+      "durable": true
+    },
+    {
+      "name": "active-plan-pre-state-is-invalid",
+      "class": "mcpFrontSerenaConflictInvalid",
+      "durable": true
+    },
+    {
+      "name": "active-plan-intended-state-is-invalid",
+      "class": "mcpFrontSerenaConflictInvalid",
+      "durable": true
+    },
+    {
+      "name": "not-precondition-conflict",
+      "class": "mcpFrontSerenaConflictNotPreconditionConflict",
+      "durable": false
+    }
+  ],
+  "overlay": {
+    "path": "internal/cli/install_reconcile_mcp_front_v3_test.go",
+    "before_blob": "8cd1aabdaa136403d37352361092fe612fc14844",
+    "before_sha256": "0c02d2d971651ed037bfa8e184da26fa6e94849b9bcb1090b5ea0277eeeb2f47",
+    "after_sha256": "fc620b87ff343e075b7419e2dc2bf91e8e8a09da2a7e3634962630a5d97a30ce",
+    "after_bytes": 113455,
+    "patch_sha256": "a1d134461054b243f7d21938793ed5d5922d7decef7da7c5ba9746dd7976cdef"
+  },
+  "go_test_args": [
+    "test",
+    "-json",
+    "-count=1",
+    "-p=1",
+    "-timeout=5m",
+    "-run",
+    "^TestMCPFrontV3_SerenaConflictClassifierMutationTable$",
+    "./internal/cli"
+  ],
+  "executed": false,
+  "production_changed": false,
+  "scope_note": "Diagnostic overlay only. Measures aggregate stage wall time; does not isolate FlushFileBuffers and does not establish the full-suite timeout cause."
+}

@@ -1,0 +1,1225 @@
+{
+  "schema": "r25-go-budget-diagnostic-result-v1",
+  "complete_selection": true,
+  "problems": [],
+  "exit_code": 0,
+  "log_bytes": 95183,
+  "log_sha256": "40ff84d212a73788f1ab8e9d4c31040c451a708f3bf50756fa85a61acf1c54d3",
+  "declared_source_ref": "2d12d9b63e60387591d27515aef3487c0e3ea560",
+  "declared_overlay": {
+    "path": "internal/cli/install_reconcile_mcp_front_v3_test.go",
+    "before_blob": "8cd1aabdaa136403d37352361092fe612fc14844",
+    "before_sha256": "0c02d2d971651ed037bfa8e184da26fa6e94849b9bcb1090b5ea0277eeeb2f47",
+    "after_sha256": "fc620b87ff343e075b7419e2dc2bf91e8e8a09da2a7e3634962630a5d97a30ce",
+    "after_bytes": 113455,
+    "patch_sha256": "a1d134461054b243f7d21938793ed5d5922d7decef7da7c5ba9746dd7976cdef"
+  },
+  "source_execution_binding_verified_by_this_reducer": false,
+  "expected_roots": 1,
+  "expected_cases": 34,
+  "expected_durable_cases": 30,
+  "expected_phase_records": 190,
+  "observed_phase_records": 190,
+  "phase_aggregates": {
+    "journal-fixture": {
+      "count": 1,
+      "sum_ns": 374749300,
+      "minimum_ns": 374749300,
+      "median_ns": 374749300,
+      "maximum_ns": 374749300
+    },
+    "initial-attempt": {
+      "count": 1,
+      "sum_ns": 108890800,
+      "minimum_ns": 108890800,
+      "median_ns": 108890800,
+      "maximum_ns": 108890800
+    },
+    "case-setup": {
+      "count": 34,
+      "sum_ns": 531300,
+      "minimum_ns": 0,
+      "median_ns": 0.0,
+      "maximum_ns": 531300
+    },
+    "classifier": {
+      "count": 34,
+      "sum_ns": 0,
+      "minimum_ns": 0,
+      "median_ns": 0.0,
+      "maximum_ns": 0
+    },
+    "fixture-directory": {
+      "count": 30,
+      "sum_ns": 17727200,
+      "minimum_ns": 0,
+      "median_ns": 535700.0,
+      "maximum_ns": 1576200
+    },
+    "fixture-write": {
+      "count": 30,
+      "sum_ns": 4234713400,
+      "minimum_ns": 33114000,
+      "median_ns": 51946250.0,
+      "maximum_ns": 2139695500
+    },
+    "read-validation": {
+      "count": 30,
+      "sum_ns": 10808200,
+      "minimum_ns": 0,
+      "median_ns": 505400.0,
+      "maximum_ns": 809200
+    },
+    "rollback-refusal": {
+      "count": 30,
+      "sum_ns": 2797100,
+      "minimum_ns": 0,
+      "median_ns": 0.0,
+      "maximum_ns": 624500
+    }
+  },
+  "test_events": {
+    "TestMCPFrontV3_SerenaConflictClassifierMutationTable": {
+      "run": "2026-11-21T15:31:23.5153953+03:00",
+      "terminal": "2026-11-21T15:31:28.2999572+03:00",
+      "go_elapsed_seconds": 4.78
+    },
+    "TestMCPFrontV3_SerenaConflictClassifierMutationTable/fresh-authority-free-pinless": {
+      "run": "2026-11-21T15:31:23.9990335+03:00",
+      "terminal": "2026-11-21T15:31:23.9995648+03:00",
+      "go_elapsed_seconds": 0
+    },
+    "TestMCPFrontV3_SerenaConflictClassifierMutationTable/retained-pinned-no-receipt": {
+      "run": "2026-11-21T15:31:23.9995648+03:00",
+      "terminal": "2026-11-21T15:31:23.9995648+03:00",
+      "go_elapsed_seconds": 0
+    },
+    "TestMCPFrontV3_SerenaConflictClassifierMutationTable/retained-prior-applied": {
+      "run": "2026-11-21T15:31:23.9995648+03:00",
+      "terminal": "2026-11-21T15:31:23.9995648+03:00",
+      "go_elapsed_seconds": 0
+    },
+    "TestMCPFrontV3_SerenaConflictClassifierMutationTable/applied-without-pin-is-invalid": {
+      "run": "2026-11-21T15:31:23.9995648+03:00",
+      "terminal": "2026-11-21T15:31:24.1069839+03:00",
+      "go_elapsed_seconds": 0.11
+    },
+    "TestMCPFrontV3_SerenaConflictClassifierMutationTable/retained-no-receipt-without-pin-is-invalid": {
+      "run": "2026-11-21T15:31:24.1069839+03:00",
+      "terminal": "2026-11-21T15:31:24.210704+03:00",
+      "go_elapsed_seconds": 0.1
+    },
+    "TestMCPFrontV3_SerenaConflictClassifierMutationTable/prior-applied-receipt-removed-is-invalid": {
+      "run": "2026-11-21T15:31:24.210704+03:00",
+      "terminal": "2026-11-21T15:31:24.2560061+03:00",
+      "go_elapsed_seconds": 0.05
+    },
+    "TestMCPFrontV3_SerenaConflictClassifierMutationTable/prior-applied-current-generation-is-invalid": {
+      "run": "2026-11-21T15:31:24.2560061+03:00",
+      "terminal": "2026-11-21T15:31:24.3101104+03:00",
+      "go_elapsed_seconds": 0.05
+    },
+    "TestMCPFrontV3_SerenaConflictClassifierMutationTable/prior-applied-post-state-is-invalid": {
+      "run": "2026-11-21T15:31:24.3101104+03:00",
+      "terminal": "2026-11-21T15:31:24.4215646+03:00",
+      "go_elapsed_seconds": 0.11
+    },
+    "TestMCPFrontV3_SerenaConflictClassifierMutationTable/nil-disposition-is-invalid": {
+      "run": "2026-11-21T15:31:24.4220916+03:00",
+      "terminal": "2026-11-21T15:31:24.5763239+03:00",
+      "go_elapsed_seconds": 0.15
+    },
+    "TestMCPFrontV3_SerenaConflictClassifierMutationTable/empty-disposition-is-invalid": {
+      "run": "2026-11-21T15:31:24.5763239+03:00",
+      "terminal": "2026-11-21T15:31:24.6724948+03:00",
+      "go_elapsed_seconds": 0.1
+    },
+    "TestMCPFrontV3_SerenaConflictClassifierMutationTable/baseline-only-disposition-is-invalid": {
+      "run": "2026-11-21T15:31:24.6724948+03:00",
+      "terminal": "2026-11-21T15:31:24.7765356+03:00",
+      "go_elapsed_seconds": 0.1
+    },
+    "TestMCPFrontV3_SerenaConflictClassifierMutationTable/restored-disposition-is-invalid": {
+      "run": "2026-11-21T15:31:24.7765356+03:00",
+      "terminal": "2026-11-21T15:31:24.9192048+03:00",
+      "go_elapsed_seconds": 0.14
+    },
+    "TestMCPFrontV3_SerenaConflictClassifierMutationTable/failed-disposition-is-invalid": {
+      "run": "2026-11-21T15:31:24.9192048+03:00",
+      "terminal": "2026-11-21T15:31:25.0308972+03:00",
+      "go_elapsed_seconds": 0.11
+    },
+    "TestMCPFrontV3_SerenaConflictClassifierMutationTable/unknown-disposition-is-invalid": {
+      "run": "2026-11-21T15:31:25.0308972+03:00",
+      "terminal": "2026-11-21T15:31:25.1057483+03:00",
+      "go_elapsed_seconds": 0.07
+    },
+    "TestMCPFrontV3_SerenaConflictClassifierMutationTable/wrong-conflict-reason-is-invalid": {
+      "run": "2026-11-21T15:31:25.1057483+03:00",
+      "terminal": "2026-11-21T15:31:25.1752908+03:00",
+      "go_elapsed_seconds": 0.07
+    },
+    "TestMCPFrontV3_SerenaConflictClassifierMutationTable/wrong-pending-reason-is-invalid": {
+      "run": "2026-11-21T15:31:25.1752908+03:00",
+      "terminal": "2026-11-21T15:31:25.219899+03:00",
+      "go_elapsed_seconds": 0.05
+    },
+    "TestMCPFrontV3_SerenaConflictClassifierMutationTable/dependency-identity-is-invalid": {
+      "run": "2026-11-21T15:31:25.219899+03:00",
+      "terminal": "2026-11-21T15:31:25.2648118+03:00",
+      "go_elapsed_seconds": 0.04
+    },
+    "TestMCPFrontV3_SerenaConflictClassifierMutationTable/surface-is-invalid": {
+      "run": "2026-11-21T15:31:25.2648118+03:00",
+      "terminal": "2026-11-21T15:31:25.322004+03:00",
+      "go_elapsed_seconds": 0.06
+    },
+    "TestMCPFrontV3_SerenaConflictClassifierMutationTable/client-is-invalid": {
+      "run": "2026-11-21T15:31:25.322004+03:00",
+      "terminal": "2026-11-21T15:31:25.3644987+03:00",
+      "go_elapsed_seconds": 0.04
+    },
+    "TestMCPFrontV3_SerenaConflictClassifierMutationTable/language-is-invalid": {
+      "run": "2026-11-21T15:31:25.3644987+03:00",
+      "terminal": "2026-11-21T15:31:25.4124109+03:00",
+      "go_elapsed_seconds": 0.05
+    },
+    "TestMCPFrontV3_SerenaConflictClassifierMutationTable/row-identity-is-invalid": {
+      "run": "2026-11-21T15:31:25.4124109+03:00",
+      "terminal": "2026-11-21T15:31:25.4654982+03:00",
+      "go_elapsed_seconds": 0.05
+    },
+    "TestMCPFrontV3_SerenaConflictClassifierMutationTable/baseline-marker-is-invalid": {
+      "run": "2026-11-21T15:31:25.4654982+03:00",
+      "terminal": "2026-11-21T15:31:25.5137529+03:00",
+      "go_elapsed_seconds": 0.05
+    },
+    "TestMCPFrontV3_SerenaConflictClassifierMutationTable/fresh-baseline-state-is-invalid": {
+      "run": "2026-11-21T15:31:25.5137529+03:00",
+      "terminal": "2026-11-21T15:31:25.564293+03:00",
+      "go_elapsed_seconds": 0.05
+    },
+    "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-generation-is-invalid": {
+      "run": "2026-11-21T15:31:25.564293+03:00",
+      "terminal": "2026-11-21T15:31:25.6153384+03:00",
+      "go_elapsed_seconds": 0.05
+    },
+    "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-operation-is-invalid": {
+      "run": "2026-11-21T15:31:25.6153384+03:00",
+      "terminal": "2026-11-21T15:31:25.6638624+03:00",
+      "go_elapsed_seconds": 0.05
+    },
+    "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-pre-state-is-invalid": {
+      "run": "2026-11-21T15:31:25.6638624+03:00",
+      "terminal": "2026-11-21T15:31:25.8627607+03:00",
+      "go_elapsed_seconds": 0.2
+    },
+    "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-intended-state-is-invalid": {
+      "run": "2026-11-21T15:31:25.8627607+03:00",
+      "terminal": "2026-11-21T15:31:25.9219641+03:00",
+      "go_elapsed_seconds": 0.06
+    },
+    "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-generation-is-invalid": {
+      "run": "2026-11-21T15:31:25.9219641+03:00",
+      "terminal": "2026-11-21T15:31:25.9564025+03:00",
+      "go_elapsed_seconds": 0.03
+    },
+    "TestMCPFrontV3_SerenaConflictClassifierMutationTable/report-generation-is-invalid": {
+      "run": "2026-11-21T15:31:25.9564025+03:00",
+      "terminal": "2026-11-21T15:31:26.0079683+03:00",
+      "go_elapsed_seconds": 0.05
+    },
+    "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-row-key-is-invalid": {
+      "run": "2026-11-21T15:31:26.0079683+03:00",
+      "terminal": "2026-11-21T15:31:28.150041+03:00",
+      "go_elapsed_seconds": 2.14
+    },
+    "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-operation-is-invalid": {
+      "run": "2026-11-21T15:31:28.150041+03:00",
+      "terminal": "2026-11-21T15:31:28.2024048+03:00",
+      "go_elapsed_seconds": 0.05
+    },
+    "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-pre-state-is-invalid": {
+      "run": "2026-11-21T15:31:28.2024048+03:00",
+      "terminal": "2026-11-21T15:31:28.2497169+03:00",
+      "go_elapsed_seconds": 0.05
+    },
+    "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-intended-state-is-invalid": {
+      "run": "2026-11-21T15:31:28.2497169+03:00",
+      "terminal": "2026-11-21T15:31:28.292569+03:00",
+      "go_elapsed_seconds": 0.04
+    },
+    "TestMCPFrontV3_SerenaConflictClassifierMutationTable/not-precondition-conflict": {
+      "run": "2026-11-21T15:31:28.292569+03:00",
+      "terminal": "2026-11-21T15:31:28.292569+03:00",
+      "go_elapsed_seconds": 0
+    }
+  },
+  "package_terminals": [
+    {
+      "Time": "2026-11-21T15:31:28.3049341+03:00",
+      "Action": "pass",
+      "Package": "mcp-local-hub/internal/cli",
+      "Elapsed": 5.054
+    }
+  ],
+  "phase_records": [
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable",
+      "phase": "journal-fixture",
+      "elapsed_ns": 374749300
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable",
+      "phase": "initial-attempt",
+      "elapsed_ns": 108890800
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/fresh-authority-free-pinless",
+      "phase": "case-setup",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/fresh-authority-free-pinless",
+      "phase": "classifier",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/retained-pinned-no-receipt",
+      "phase": "case-setup",
+      "elapsed_ns": 531300
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/retained-pinned-no-receipt",
+      "phase": "classifier",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/retained-prior-applied",
+      "phase": "case-setup",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/retained-prior-applied",
+      "phase": "classifier",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/applied-without-pin-is-invalid",
+      "phase": "case-setup",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/applied-without-pin-is-invalid",
+      "phase": "classifier",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/applied-without-pin-is-invalid",
+      "phase": "fixture-directory",
+      "elapsed_ns": 1576200
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/applied-without-pin-is-invalid",
+      "phase": "fixture-write",
+      "elapsed_ns": 103734300
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/applied-without-pin-is-invalid",
+      "phase": "read-validation",
+      "elapsed_ns": 521400
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/applied-without-pin-is-invalid",
+      "phase": "rollback-refusal",
+      "elapsed_ns": 525700
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/retained-no-receipt-without-pin-is-invalid",
+      "phase": "case-setup",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/retained-no-receipt-without-pin-is-invalid",
+      "phase": "classifier",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/retained-no-receipt-without-pin-is-invalid",
+      "phase": "fixture-directory",
+      "elapsed_ns": 597400
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/retained-no-receipt-without-pin-is-invalid",
+      "phase": "fixture-write",
+      "elapsed_ns": 101557300
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/retained-no-receipt-without-pin-is-invalid",
+      "phase": "read-validation",
+      "elapsed_ns": 506500
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/retained-no-receipt-without-pin-is-invalid",
+      "phase": "rollback-refusal",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/prior-applied-receipt-removed-is-invalid",
+      "phase": "case-setup",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/prior-applied-receipt-removed-is-invalid",
+      "phase": "classifier",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/prior-applied-receipt-removed-is-invalid",
+      "phase": "fixture-directory",
+      "elapsed_ns": 512700
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/prior-applied-receipt-removed-is-invalid",
+      "phase": "fixture-write",
+      "elapsed_ns": 43237500
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/prior-applied-receipt-removed-is-invalid",
+      "phase": "read-validation",
+      "elapsed_ns": 507600
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/prior-applied-receipt-removed-is-invalid",
+      "phase": "rollback-refusal",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/prior-applied-current-generation-is-invalid",
+      "phase": "case-setup",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/prior-applied-current-generation-is-invalid",
+      "phase": "classifier",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/prior-applied-current-generation-is-invalid",
+      "phase": "fixture-directory",
+      "elapsed_ns": 527300
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/prior-applied-current-generation-is-invalid",
+      "phase": "fixture-write",
+      "elapsed_ns": 52399900
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/prior-applied-current-generation-is-invalid",
+      "phase": "read-validation",
+      "elapsed_ns": 505800
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/prior-applied-current-generation-is-invalid",
+      "phase": "rollback-refusal",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/prior-applied-post-state-is-invalid",
+      "phase": "case-setup",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/prior-applied-post-state-is-invalid",
+      "phase": "classifier",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/prior-applied-post-state-is-invalid",
+      "phase": "fixture-directory",
+      "elapsed_ns": 505800
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/prior-applied-post-state-is-invalid",
+      "phase": "fixture-write",
+      "elapsed_ns": 109774200
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/prior-applied-post-state-is-invalid",
+      "phase": "read-validation",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/prior-applied-post-state-is-invalid",
+      "phase": "rollback-refusal",
+      "elapsed_ns": 507300
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/nil-disposition-is-invalid",
+      "phase": "case-setup",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/nil-disposition-is-invalid",
+      "phase": "classifier",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/nil-disposition-is-invalid",
+      "phase": "fixture-directory",
+      "elapsed_ns": 528600
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/nil-disposition-is-invalid",
+      "phase": "fixture-write",
+      "elapsed_ns": 152638800
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/nil-disposition-is-invalid",
+      "phase": "read-validation",
+      "elapsed_ns": 504700
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/nil-disposition-is-invalid",
+      "phase": "rollback-refusal",
+      "elapsed_ns": 56600
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/empty-disposition-is-invalid",
+      "phase": "case-setup",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/empty-disposition-is-invalid",
+      "phase": "classifier",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/empty-disposition-is-invalid",
+      "phase": "fixture-directory",
+      "elapsed_ns": 514800
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/empty-disposition-is-invalid",
+      "phase": "fixture-write",
+      "elapsed_ns": 94096400
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/empty-disposition-is-invalid",
+      "phase": "read-validation",
+      "elapsed_ns": 504600
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/empty-disposition-is-invalid",
+      "phase": "rollback-refusal",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/baseline-only-disposition-is-invalid",
+      "phase": "case-setup",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/baseline-only-disposition-is-invalid",
+      "phase": "classifier",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/baseline-only-disposition-is-invalid",
+      "phase": "fixture-directory",
+      "elapsed_ns": 520400
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/baseline-only-disposition-is-invalid",
+      "phase": "fixture-write",
+      "elapsed_ns": 101406300
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/baseline-only-disposition-is-invalid",
+      "phase": "read-validation",
+      "elapsed_ns": 505000
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/baseline-only-disposition-is-invalid",
+      "phase": "rollback-refusal",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/restored-disposition-is-invalid",
+      "phase": "case-setup",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/restored-disposition-is-invalid",
+      "phase": "classifier",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/restored-disposition-is-invalid",
+      "phase": "fixture-directory",
+      "elapsed_ns": 528800
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/restored-disposition-is-invalid",
+      "phase": "fixture-write",
+      "elapsed_ns": 140566600
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/restored-disposition-is-invalid",
+      "phase": "read-validation",
+      "elapsed_ns": 509000
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/restored-disposition-is-invalid",
+      "phase": "rollback-refusal",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/failed-disposition-is-invalid",
+      "phase": "case-setup",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/failed-disposition-is-invalid",
+      "phase": "classifier",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/failed-disposition-is-invalid",
+      "phase": "fixture-directory",
+      "elapsed_ns": 518100
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/failed-disposition-is-invalid",
+      "phase": "fixture-write",
+      "elapsed_ns": 109564300
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/failed-disposition-is-invalid",
+      "phase": "read-validation",
+      "elapsed_ns": 515500
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/failed-disposition-is-invalid",
+      "phase": "rollback-refusal",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/unknown-disposition-is-invalid",
+      "phase": "case-setup",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/unknown-disposition-is-invalid",
+      "phase": "classifier",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/unknown-disposition-is-invalid",
+      "phase": "fixture-directory",
+      "elapsed_ns": 549100
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/unknown-disposition-is-invalid",
+      "phase": "fixture-write",
+      "elapsed_ns": 72763700
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/unknown-disposition-is-invalid",
+      "phase": "read-validation",
+      "elapsed_ns": 504800
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/unknown-disposition-is-invalid",
+      "phase": "rollback-refusal",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/wrong-conflict-reason-is-invalid",
+      "phase": "case-setup",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/wrong-conflict-reason-is-invalid",
+      "phase": "classifier",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/wrong-conflict-reason-is-invalid",
+      "phase": "fixture-directory",
+      "elapsed_ns": 516300
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/wrong-conflict-reason-is-invalid",
+      "phase": "fixture-write",
+      "elapsed_ns": 67886700
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/wrong-conflict-reason-is-invalid",
+      "phase": "read-validation",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/wrong-conflict-reason-is-invalid",
+      "phase": "rollback-refusal",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/wrong-pending-reason-is-invalid",
+      "phase": "case-setup",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/wrong-pending-reason-is-invalid",
+      "phase": "classifier",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/wrong-pending-reason-is-invalid",
+      "phase": "fixture-directory",
+      "elapsed_ns": 589000
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/wrong-pending-reason-is-invalid",
+      "phase": "fixture-write",
+      "elapsed_ns": 42980700
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/wrong-pending-reason-is-invalid",
+      "phase": "read-validation",
+      "elapsed_ns": 518100
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/wrong-pending-reason-is-invalid",
+      "phase": "rollback-refusal",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/dependency-identity-is-invalid",
+      "phase": "case-setup",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/dependency-identity-is-invalid",
+      "phase": "classifier",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/dependency-identity-is-invalid",
+      "phase": "fixture-directory",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/dependency-identity-is-invalid",
+      "phase": "fixture-write",
+      "elapsed_ns": 43289600
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/dependency-identity-is-invalid",
+      "phase": "read-validation",
+      "elapsed_ns": 527800
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/dependency-identity-is-invalid",
+      "phase": "rollback-refusal",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/surface-is-invalid",
+      "phase": "case-setup",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/surface-is-invalid",
+      "phase": "classifier",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/surface-is-invalid",
+      "phase": "fixture-directory",
+      "elapsed_ns": 724500
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/surface-is-invalid",
+      "phase": "fixture-write",
+      "elapsed_ns": 55261000
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/surface-is-invalid",
+      "phase": "read-validation",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/surface-is-invalid",
+      "phase": "rollback-refusal",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/client-is-invalid",
+      "phase": "case-setup",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/client-is-invalid",
+      "phase": "classifier",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/client-is-invalid",
+      "phase": "fixture-directory",
+      "elapsed_ns": 62800
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/client-is-invalid",
+      "phase": "fixture-write",
+      "elapsed_ns": 41383300
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/client-is-invalid",
+      "phase": "read-validation",
+      "elapsed_ns": 552100
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/client-is-invalid",
+      "phase": "rollback-refusal",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/language-is-invalid",
+      "phase": "case-setup",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/language-is-invalid",
+      "phase": "classifier",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/language-is-invalid",
+      "phase": "fixture-directory",
+      "elapsed_ns": 1079400
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/language-is-invalid",
+      "phase": "fixture-write",
+      "elapsed_ns": 45810300
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/language-is-invalid",
+      "phase": "read-validation",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/language-is-invalid",
+      "phase": "rollback-refusal",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/row-identity-is-invalid",
+      "phase": "case-setup",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/row-identity-is-invalid",
+      "phase": "classifier",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/row-identity-is-invalid",
+      "phase": "fixture-directory",
+      "elapsed_ns": 528600
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/row-identity-is-invalid",
+      "phase": "fixture-write",
+      "elapsed_ns": 51492600
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/row-identity-is-invalid",
+      "phase": "read-validation",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/row-identity-is-invalid",
+      "phase": "rollback-refusal",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/baseline-marker-is-invalid",
+      "phase": "case-setup",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/baseline-marker-is-invalid",
+      "phase": "classifier",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/baseline-marker-is-invalid",
+      "phase": "fixture-directory",
+      "elapsed_ns": 743000
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/baseline-marker-is-invalid",
+      "phase": "fixture-write",
+      "elapsed_ns": 46728600
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/baseline-marker-is-invalid",
+      "phase": "read-validation",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/baseline-marker-is-invalid",
+      "phase": "rollback-refusal",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/fresh-baseline-state-is-invalid",
+      "phase": "case-setup",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/fresh-baseline-state-is-invalid",
+      "phase": "classifier",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/fresh-baseline-state-is-invalid",
+      "phase": "fixture-directory",
+      "elapsed_ns": 648800
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/fresh-baseline-state-is-invalid",
+      "phase": "fixture-write",
+      "elapsed_ns": 49104700
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/fresh-baseline-state-is-invalid",
+      "phase": "read-validation",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/fresh-baseline-state-is-invalid",
+      "phase": "rollback-refusal",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-generation-is-invalid",
+      "phase": "case-setup",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-generation-is-invalid",
+      "phase": "classifier",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-generation-is-invalid",
+      "phase": "fixture-directory",
+      "elapsed_ns": 693900
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-generation-is-invalid",
+      "phase": "fixture-write",
+      "elapsed_ns": 49230600
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-generation-is-invalid",
+      "phase": "read-validation",
+      "elapsed_ns": 559100
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-generation-is-invalid",
+      "phase": "rollback-refusal",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-operation-is-invalid",
+      "phase": "case-setup",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-operation-is-invalid",
+      "phase": "classifier",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-operation-is-invalid",
+      "phase": "fixture-directory",
+      "elapsed_ns": 559700
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-operation-is-invalid",
+      "phase": "fixture-write",
+      "elapsed_ns": 46891100
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-operation-is-invalid",
+      "phase": "read-validation",
+      "elapsed_ns": 551500
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-operation-is-invalid",
+      "phase": "rollback-refusal",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-pre-state-is-invalid",
+      "phase": "case-setup",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-pre-state-is-invalid",
+      "phase": "classifier",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-pre-state-is-invalid",
+      "phase": "fixture-directory",
+      "elapsed_ns": 581100
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-pre-state-is-invalid",
+      "phase": "fixture-write",
+      "elapsed_ns": 196134000
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-pre-state-is-invalid",
+      "phase": "read-validation",
+      "elapsed_ns": 504300
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-pre-state-is-invalid",
+      "phase": "rollback-refusal",
+      "elapsed_ns": 551800
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-intended-state-is-invalid",
+      "phase": "case-setup",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-intended-state-is-invalid",
+      "phase": "classifier",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-intended-state-is-invalid",
+      "phase": "fixture-directory",
+      "elapsed_ns": 503700
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-intended-state-is-invalid",
+      "phase": "fixture-write",
+      "elapsed_ns": 57625100
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-intended-state-is-invalid",
+      "phase": "read-validation",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-intended-state-is-invalid",
+      "phase": "rollback-refusal",
+      "elapsed_ns": 531200
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-generation-is-invalid",
+      "phase": "case-setup",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-generation-is-invalid",
+      "phase": "classifier",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-generation-is-invalid",
+      "phase": "fixture-directory",
+      "elapsed_ns": 540600
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-generation-is-invalid",
+      "phase": "fixture-write",
+      "elapsed_ns": 33114000
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-generation-is-invalid",
+      "phase": "read-validation",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-generation-is-invalid",
+      "phase": "rollback-refusal",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/report-generation-is-invalid",
+      "phase": "case-setup",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/report-generation-is-invalid",
+      "phase": "classifier",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/report-generation-is-invalid",
+      "phase": "fixture-directory",
+      "elapsed_ns": 763700
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/report-generation-is-invalid",
+      "phase": "fixture-write",
+      "elapsed_ns": 49766400
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/report-generation-is-invalid",
+      "phase": "read-validation",
+      "elapsed_ns": 515600
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/report-generation-is-invalid",
+      "phase": "rollback-refusal",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-row-key-is-invalid",
+      "phase": "case-setup",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-row-key-is-invalid",
+      "phase": "classifier",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-row-key-is-invalid",
+      "phase": "fixture-directory",
+      "elapsed_ns": 517900
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-row-key-is-invalid",
+      "phase": "fixture-write",
+      "elapsed_ns": 2139695500
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-row-key-is-invalid",
+      "phase": "read-validation",
+      "elapsed_ns": 809200
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-row-key-is-invalid",
+      "phase": "rollback-refusal",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-operation-is-invalid",
+      "phase": "case-setup",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-operation-is-invalid",
+      "phase": "classifier",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-operation-is-invalid",
+      "phase": "fixture-directory",
+      "elapsed_ns": 578300
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-operation-is-invalid",
+      "phase": "fixture-write",
+      "elapsed_ns": 50189700
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-operation-is-invalid",
+      "phase": "read-validation",
+      "elapsed_ns": 572500
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-operation-is-invalid",
+      "phase": "rollback-refusal",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-pre-state-is-invalid",
+      "phase": "case-setup",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-pre-state-is-invalid",
+      "phase": "classifier",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-pre-state-is-invalid",
+      "phase": "fixture-directory",
+      "elapsed_ns": 530800
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-pre-state-is-invalid",
+      "phase": "fixture-write",
+      "elapsed_ns": 45442000
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-pre-state-is-invalid",
+      "phase": "read-validation",
+      "elapsed_ns": 613100
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-pre-state-is-invalid",
+      "phase": "rollback-refusal",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-intended-state-is-invalid",
+      "phase": "case-setup",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-intended-state-is-invalid",
+      "phase": "classifier",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-intended-state-is-invalid",
+      "phase": "fixture-directory",
+      "elapsed_ns": 685900
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-intended-state-is-invalid",
+      "phase": "fixture-write",
+      "elapsed_ns": 40948200
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-intended-state-is-invalid",
+      "phase": "read-validation",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-intended-state-is-invalid",
+      "phase": "rollback-refusal",
+      "elapsed_ns": 624500
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/not-precondition-conflict",
+      "phase": "case-setup",
+      "elapsed_ns": 0
+    },
+    {
+      "test": "TestMCPFrontV3_SerenaConflictClassifierMutationTable/not-precondition-conflict",
+      "phase": "classifier",
+      "elapsed_ns": 0
+    }
+  ],
+  "limits": [
+    "Fixture-write includes the complete WriteStateFileAtomic call, not FlushFileBuffers alone.",
+    "Logging, assertions, uninstrumented setup, test cleanup and TestMain are outside these stage timers.",
+    "Do not subtract stage sums from rounded Go Elapsed to infer CPU time or idle time.",
+    "A single instrumented sample is not a speedup, stable budget or full-suite acceptance result.",
+    "Collector source, environment, command and settlement receipts remain separately required."
+  ]
+}

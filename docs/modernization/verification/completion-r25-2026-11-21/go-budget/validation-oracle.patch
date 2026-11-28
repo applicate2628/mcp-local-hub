@@ -1,0 +1,109 @@
+--- a/internal/cli/install_reconcile_mcp_front_v3_test.go
++++ b/internal/cli/install_reconcile_mcp_front_v3_test.go
+@@ -711,10 +711,11 @@
+ 		row.Disposition.Reason = "forward-precondition-conflict-prior-owned"
+ 	}
+ 	tests := []struct {
+-		name    string
+-		prepare func(*mcpFrontReconcileReport, *mcpFrontReconcileRow)
+-		mutate  func(*mcpFrontReconcileReport, *mcpFrontReconcileRow)
+-		want    mcpFrontSerenaConflictClass
++		name              string
++		prepare           func(*mcpFrontReconcileReport, *mcpFrontReconcileRow)
++		mutate            func(*mcpFrontReconcileReport, *mcpFrontReconcileRow)
++		want              mcpFrontSerenaConflictClass
++		wantValidationErr string
+ 	}{
+ 		{name: "fresh-authority-free-pinless", want: mcpFrontSerenaConflictFreshAuthorityFreePinless},
+ 		{name: "retained-pinned-no-receipt", want: mcpFrontSerenaConflictRetainedPinnedNoReceipt,
+@@ -722,11 +723,13 @@
+ 		{name: "retained-prior-applied", want: mcpFrontSerenaConflictRetainedPriorApplied,
+ 			prepare: retainedPriorApplied},
+ 		{name: "applied-without-pin-is-invalid", want: mcpFrontSerenaConflictInvalid,
+-			prepare: retainedPriorApplied,
+-			mutate:  func(_ *mcpFrontReconcileReport, row *mcpFrontReconcileRow) { row.Pin = nil }},
++			prepare:           retainedPriorApplied,
++			mutate:            func(_ *mcpFrontReconcileReport, row *mcpFrontReconcileRow) { row.Pin = nil },
++			wantValidationErr: "has mismatched pin binding"},
+ 		{name: "retained-no-receipt-without-pin-is-invalid", want: mcpFrontSerenaConflictInvalid,
+-			prepare: retainedPinNoReceipt,
+-			mutate:  func(_ *mcpFrontReconcileReport, row *mcpFrontReconcileRow) { row.Pin = nil }},
++			prepare:           retainedPinNoReceipt,
++			mutate:            func(_ *mcpFrontReconcileReport, row *mcpFrontReconcileRow) { row.Pin = nil },
++			wantValidationErr: "has mismatched pin binding"},
+ 		{name: "prior-applied-receipt-removed-is-invalid", want: mcpFrontSerenaConflictInvalid,
+ 			prepare: retainedPriorApplied,
+ 			mutate:  func(_ *mcpFrontReconcileReport, row *mcpFrontReconcileRow) { row.Applied = nil }},
+@@ -770,13 +773,17 @@
+ 				row.Disposition.DependencyEntryName = "not-for-serena"
+ 			}},
+ 		{name: "surface-is-invalid", want: mcpFrontSerenaConflictInvalid,
+-			mutate: func(_ *mcpFrontReconcileReport, row *mcpFrontReconcileRow) { row.Surface = mcpFrontSurfaceLSP }},
++			mutate:            func(_ *mcpFrontReconcileReport, row *mcpFrontReconcileRow) { row.Surface = mcpFrontSurfaceLSP },
++			wantValidationErr: "carries a serena pin binding"},
+ 		{name: "client-is-invalid", want: mcpFrontSerenaConflictInvalid,
+-			mutate: func(_ *mcpFrontReconcileReport, row *mcpFrontReconcileRow) { row.Client = "" }},
++			mutate:            func(_ *mcpFrontReconcileReport, row *mcpFrontReconcileRow) { row.Client = "" },
++			wantValidationErr: "does not match its exact identity"},
+ 		{name: "language-is-invalid", want: mcpFrontSerenaConflictInvalid,
+-			mutate: func(_ *mcpFrontReconcileReport, row *mcpFrontReconcileRow) { row.Language = "go" }},
++			mutate:            func(_ *mcpFrontReconcileReport, row *mcpFrontReconcileRow) { row.Language = "go" },
++			wantValidationErr: "does not match its exact identity"},
+ 		{name: "row-identity-is-invalid", want: mcpFrontSerenaConflictInvalid,
+-			mutate: func(_ *mcpFrontReconcileReport, row *mcpFrontReconcileRow) { row.EntryName = "not-serena" }},
++			mutate:            func(_ *mcpFrontReconcileReport, row *mcpFrontReconcileRow) { row.EntryName = "not-serena" },
++			wantValidationErr: "does not match its exact identity"},
+ 		{name: "baseline-marker-is-invalid", want: mcpFrontSerenaConflictInvalid,
+ 			mutate: func(_ *mcpFrontReconcileReport, row *mcpFrontReconcileRow) { row.BaselineSet = false }},
+ 		{name: "fresh-baseline-state-is-invalid", want: mcpFrontSerenaConflictInvalid,
+@@ -796,17 +803,21 @@
+ 				row.Attempt.IntendedState = mcpFrontSerenaState("different")
+ 			}},
+ 		{name: "active-plan-generation-is-invalid", want: mcpFrontSerenaConflictInvalid,
+-			mutate: func(report *mcpFrontReconcileReport, _ *mcpFrontReconcileRow) { report.ActivePlan.Generation++ }},
++			mutate:            func(report *mcpFrontReconcileReport, _ *mcpFrontReconcileRow) { report.ActivePlan.Generation++ },
++			wantValidationErr: "active plan generation 2 does not match artifact generation 1"},
+ 		{name: "report-generation-is-invalid", want: mcpFrontSerenaConflictInvalid,
+-			mutate: func(report *mcpFrontReconcileReport, _ *mcpFrontReconcileRow) { report.Generation++ }},
++			mutate:            func(report *mcpFrontReconcileReport, _ *mcpFrontReconcileRow) { report.Generation++ },
++			wantValidationErr: "active plan generation 1 does not match artifact generation 2"},
+ 		{name: "active-plan-row-key-is-invalid", want: mcpFrontSerenaConflictInvalid,
+ 			mutate: func(report *mcpFrontReconcileReport, _ *mcpFrontReconcileRow) {
+ 				report.ActivePlan.Operations[0].RowKey = "other"
+-			}},
++			},
++			wantValidationErr: `active generation operation references unplanned row "other"`},
+ 		{name: "active-plan-operation-is-invalid", want: mcpFrontSerenaConflictInvalid,
+ 			mutate: func(report *mcpFrontReconcileReport, _ *mcpFrontReconcileRow) {
+ 				report.ActivePlan.Operations[0].Operation = "remove"
+-			}},
++			},
++			wantValidationErr: `serena operation "remove" is not supported`},
+ 		{name: "active-plan-pre-state-is-invalid", want: mcpFrontSerenaConflictInvalid,
+ 			mutate: func(report *mcpFrontReconcileReport, _ *mcpFrontReconcileRow) {
+ 				report.ActivePlan.Operations[0].PreState = mcpFrontSerenaState("different")
+@@ -840,16 +851,20 @@
+ 			if err := api.WriteStateFileAtomic(reportPath, report); err != nil {
+ 				t.Fatal(err)
+ 			}
+-			if _, err := readMCPFrontReconcileReport(reportPath); err == nil {
+-				t.Fatal("invalid Serena conflict shape passed durable validation")
++			wantValidationErr := test.wantValidationErr
++			if wantValidationErr == "" {
++				wantValidationErr = "has an invalid authority shape"
++			}
++			if _, err := readMCPFrontReconcileReport(reportPath); err == nil || !strings.Contains(err.Error(), wantValidationErr) {
++				t.Fatalf("read=%v, want domain validation failure %q", err, wantValidationErr)
+ 			}
+ 			readerCalls := 0
+ 			err := runRollbackMCPFrontWithReader(newMCPFrontTestCmd(), api.NewAPI(), reportPath, func(context.Context, string, []string, string) ([]byte, error) {
+ 				readerCalls++
+ 				return nil, errors.New("invalid conflict shape reached pin reader")
+ 			})
+-			if err == nil {
+-				t.Fatal("invalid Serena conflict shape reached rollback")
++			if err == nil || !strings.Contains(err.Error(), wantValidationErr) {
++				t.Fatalf("rollback=%v, want domain validation failure %q", err, wantValidationErr)
+ 			}
+ 			if readerCalls != 0 {
+ 				t.Fatalf("invalid Serena conflict shape reached pin reader %d time(s)", readerCalls)

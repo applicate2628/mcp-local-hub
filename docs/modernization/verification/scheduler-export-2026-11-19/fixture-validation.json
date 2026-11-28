@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-19",
+  "date_timezone": "Europe/Moscow",
+  "source_head": "1b870e04f58bbf60fde2d2339fcd4ae9b50b24c3",
+  "fixture_file": "Invoke-R17HiddenFixture.ps1",
+  "fixture_sha256": "6a7d123334ae13aaf5890a491813091a2a2a4831650d25940d1814ca40a2ee4c",
+  "source_sha256": "e2594cbe0a0cca61038a09ea7d37a701132be378bec6b935236e8b4233ed43fa",
+  "remote_input_hashes_rechecked": true,
+  "source_snapshot_bytes": 10040,
+  "syntax_parse": {
+    "engine": "Windows PowerShell on Comet",
+    "method": "System.Management.Automation.Language.Parser.ParseFile",
+    "process_completion_observed": true,
+    "syntax_errors": 0,
+    "messages": [],
+    "token_count": 2459,
+    "has_apply_parameter": true,
+    "script_evaluated": false,
+    "fixture_sha256": "6a7d123334ae13aaf5890a491813091a2a2a4831650d25940d1814ca40a2ee4c"
+  },
+  "default_file_launch": {
+    "invocation": "powershell.exe -NoProfile -NonInteractive -File Invoke-R17HiddenFixture.ps1",
+    "apply_requested": false,
+    "status": "BLOCKED_BEFORE_SCRIPT_EXECUTION",
+    "boundary": "host_execution_policy",
+    "fully_qualified_error_id": "UnauthorizedAccess",
+    "error_record_type": "ParentContainsErrorRecordException",
+    "host_message_meaning": "Script execution is disabled on this system",
+    "plan_json_emitted": false,
+    "process_completion_observed": true,
+    "shell_exit_code": null,
+    "shell_exit_code_note": "The remote result did not expose a separate numeric shell exit code",
+    "fixture_sha256": "342661c6f69bbbadaecd258fd193b033fb3378f3aa251bb92c707b58ea166e69",
+    "version_note": "Observed on the preceding version. Only the source-digest literal subsequently changed; final syntax was rechecked and the blocked default launch was not retried."
+  },
+  "effective_policy_query": {
+    "command": "Get-ExecutionPolicy -List",
+    "status": "UNRESOLVED",
+    "cause_observed": "Microsoft.PowerShell.Security module autoload failed",
+    "policy_value": null,
+    "governing_scope": null
+  },
+  "native_apply_executed": false,
+  "fixture_scheduler_operations_executed": false,
+  "execution_policy_changed": false,
+  "proposed_session_remote_signed_authorized": false,
+  "limits": [
+    "Syntax parsing is not script execution or native qualification",
+    "The default plan was not executed because the host rejected the file launch",
+    "The proposed RemoteSigned session and native fixture run have not been authorized or executed",
+    "No registry policy, Group Policy, module installation, or alternate executor was used",
+    "Static review does not establish a globally bounded run or an atomic compare-and-delete"
+  ],
+  "source_git_blob_sha": "bbc2d73a2fa3d59c3edb206e5be48c5cbd6f0eb7",
+  "source_binding_correction": {
+    "prepared_source_had_one_extra_final_lf": true,
+    "previous_source_sha256": "7a65f2708b3df268b2694fa45715be49873a90fb133df8ac3d07f4e82b9f1fb7",
+    "exact_git_source_sha256": "e2594cbe0a0cca61038a09ea7d37a701132be378bec6b935236e8b4233ed43fa",
+    "fixture_change": "Only the source-digest literal changed",
+    "final_remote_source_and_fixture_digests_rechecked": true
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "api": {
+    "same_ordered_roots": false,
+    "only_normal": [],
+    "only_tagged": [
+      "TestAttachExisting_PublicCLIReceiving",
+      "TestDaemonStateDir_StateDirOverride_WinsOverResolver",
+      "TestDaemonStateDir_Windows_KnownFolder",
+      "TestDaemonStateDir_Windows_KnownFolderFails_FallsBackToEnv",
+      "TestDaemonStateDir_Windows_KnownFolderFails_NoEnvVars",
+      "TestDaemonStateDir_Windows_KnownFolderFails_UserProfileFallback"
+    ]
+  },
+  "cli": {
+    "same_ordered_roots": false,
+    "only_normal": [],
+    "only_tagged": [
+      "TestMigrateSerena_RealWriterConsentReceivingWindows",
+      "TestRestoreStdioHelper",
+      "TestRestore_NoRestart_RealSupervisorOccupiedPortAndReceiptRollback"
+    ]
+  }
+}

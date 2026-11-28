@@ -1,0 +1,443 @@
+{
+  "schema": 1,
+  "mode": "remote",
+  "started_utc": "2026-11-21T10:04:34.410807+00:00",
+  "published_evidence_commit": "b1d932ea8925ef3324d539e5de006daeae65ba2a",
+  "publication_readback_sha256": "f9c1ddc8876257299717062157f0143eafc616791ad5b748334f127ce43f1942",
+  "trash_relative": "trash\\r22-r23-transfers-20261121T100434Z",
+  "status": "complete",
+  "moved": [
+    {
+      "source": "mcp-r22-completion-20261121\\transfer-r22\\archive-whole.b64",
+      "bytes": 6042623,
+      "sha256": "1e2fafea4c5195be827b2a2637db86162d70bd13e88a5fbfa56b774116722ff4",
+      "reason": "Base64 equals retained and independently published R22 archive",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r22-completion-20261121\\transfer-r22\\archive-whole.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r23-current-outcome-20261121\\transfer-go-linux.b64",
+      "bytes": 1344929,
+      "sha256": "3f924a82b456d065199c6a8d2a8cd5769c6480f4ccf18f3d2a4696480b2e8735",
+      "reason": "Base64 equals retained and independently published Go/Linux archive",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r23-current-outcome-20261121\\transfer-go-linux.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r22-completion-20261121\\linux-percent-work\\compile-control\\autostart.test.gz.b64",
+      "bytes": 3793310,
+      "sha256": "73cdd48944530a46544272c68b519d4b4a59968b6765a939debdfeac82c7ba17",
+      "reason": "Base64 equals retained gzip and original test executable",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r22-completion-20261121\\linux-percent-work\\compile-control\\autostart.test.gz.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r22-completion-20261121\\linux-percent-work\\compile-candidate\\autostart.test.gz.b64",
+      "bytes": 3793414,
+      "sha256": "04bb7753364ecba4d927d8516deed253768865e0d539af930d251894904651b9",
+      "reason": "Base64 equals retained gzip and original test executable",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r22-completion-20261121\\linux-percent-work\\compile-candidate\\autostart.test.gz.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r22-completion-20261121\\transfer-r22\\zip.part-0000.b64",
+      "bytes": 174807,
+      "sha256": "4b6b27d81acf9092dab5ac82f083b2080de97e341a17f2f70b49afcaf1f11e80",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r22-completion-20261121\\transfer-r22\\zip.part-0000.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r22-completion-20261121\\transfer-r22\\zip.part-0001.b64",
+      "bytes": 174807,
+      "sha256": "fba783ff44321cb3fdc1c8f06c43fe28a6858b76f6bb5c045dbb34f71ed99ea8",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r22-completion-20261121\\transfer-r22\\zip.part-0001.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r22-completion-20261121\\transfer-r22\\zip.part-0002.b64",
+      "bytes": 174807,
+      "sha256": "c5ec57c924a386860f5e69f52446e3c426a8e2fad31df5a5a0b00dba13083fad",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r22-completion-20261121\\transfer-r22\\zip.part-0002.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r22-completion-20261121\\transfer-r22\\zip.part-0003.b64",
+      "bytes": 174807,
+      "sha256": "89e166c93e39350aa3161800d37457bb1c6b5950f40193f02e69a65b20d998f5",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r22-completion-20261121\\transfer-r22\\zip.part-0003.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r22-completion-20261121\\transfer-r22\\zip.part-0004.b64",
+      "bytes": 174807,
+      "sha256": "5267006cf291b98c094525917b546cdb4e0be19454058e6f17aa0069dfd676b5",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r22-completion-20261121\\transfer-r22\\zip.part-0004.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r22-completion-20261121\\transfer-r22\\zip.part-0005.b64",
+      "bytes": 174807,
+      "sha256": "53b4c08115301c8a74ec76b9b7d315a85142eeeadea2b591a45a4ad5d5f63f90",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r22-completion-20261121\\transfer-r22\\zip.part-0005.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r22-completion-20261121\\transfer-r22\\zip.part-0006.b64",
+      "bytes": 174807,
+      "sha256": "16857cc2e3c6ac680e8e6eb9fa1221abc258f1cbbc385b450ef8e215eb295e8b",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r22-completion-20261121\\transfer-r22\\zip.part-0006.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r22-completion-20261121\\transfer-r22\\zip.part-0007.b64",
+      "bytes": 174807,
+      "sha256": "05378466e5abecfcf5a52d303a2823b513b1edb7a22ce2bdc035a4b0ab315a9b",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r22-completion-20261121\\transfer-r22\\zip.part-0007.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r22-completion-20261121\\transfer-r22\\zip.part-0008.b64",
+      "bytes": 174807,
+      "sha256": "d974563bcc71536b0c181cc580a41531e4d6e778219b1a7e2de348d82c3f8719",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r22-completion-20261121\\transfer-r22\\zip.part-0008.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r22-completion-20261121\\transfer-r22\\zip.part-0009.b64",
+      "bytes": 174807,
+      "sha256": "1c5614d90e1a5cecc3b575c8441baf74f69fc80f6823b20af4ad311c4173f1c2",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r22-completion-20261121\\transfer-r22\\zip.part-0009.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r22-completion-20261121\\transfer-r22\\zip.part-0010.b64",
+      "bytes": 174807,
+      "sha256": "afdf613d4a74cfbe673aa59d8969596b08b5699cc81f958bc83e83d800ba4d00",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r22-completion-20261121\\transfer-r22\\zip.part-0010.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r22-completion-20261121\\transfer-r22\\zip.part-0011.b64",
+      "bytes": 174807,
+      "sha256": "2b438a4b93904978fb64caaf87e229bae7570c32691e7345322a340119ea9325",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r22-completion-20261121\\transfer-r22\\zip.part-0011.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r22-completion-20261121\\transfer-r22\\zip.part-0012.b64",
+      "bytes": 174807,
+      "sha256": "79bd751efc7263ae88d0593e447f30b137582c1bd2bb7b8ee9ef2cac2112590d",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r22-completion-20261121\\transfer-r22\\zip.part-0012.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r22-completion-20261121\\transfer-r22\\zip.part-0013.b64",
+      "bytes": 174807,
+      "sha256": "2b3786228bb960f4564246946f70807bd4644498357a3beedf2bb5cb567ff60a",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r22-completion-20261121\\transfer-r22\\zip.part-0013.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r22-completion-20261121\\transfer-r22\\zip.part-0014.b64",
+      "bytes": 174807,
+      "sha256": "d0e4e0df0b2dd5a6f3e789d220d6e13f1be1b16f70219e00301dbab83091c37d",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r22-completion-20261121\\transfer-r22\\zip.part-0014.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r22-completion-20261121\\transfer-r22\\zip.part-0015.b64",
+      "bytes": 174807,
+      "sha256": "f9b844d5323bed978fb1c0494f7c4aa7439ec83d8ab7455b7a05b1f1261362e5",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r22-completion-20261121\\transfer-r22\\zip.part-0015.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r22-completion-20261121\\transfer-r22\\zip.part-0016.b64",
+      "bytes": 174807,
+      "sha256": "3f4a989d8943e1322343a90dd09f82bb81468de775d8b0d827145b60eabee26e",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r22-completion-20261121\\transfer-r22\\zip.part-0016.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r22-completion-20261121\\transfer-r22\\zip.part-0017.b64",
+      "bytes": 174807,
+      "sha256": "b4be53327b4780fe0c83c3d76df7f58fa46543eed9057dcee37ea1e9f0a55c35",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r22-completion-20261121\\transfer-r22\\zip.part-0017.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r22-completion-20261121\\transfer-r22\\zip.part-0018.b64",
+      "bytes": 174807,
+      "sha256": "2212ed73e298168058eb9322f1c732d22a4c2fbdfbcfbddc5d9751b2532f015f",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r22-completion-20261121\\transfer-r22\\zip.part-0018.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r22-completion-20261121\\transfer-r22\\zip.part-0019.b64",
+      "bytes": 174807,
+      "sha256": "5df09a5e6b429dfd4ec0684d653294b053adaf65c1b3d24450706c969b7ace0c",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r22-completion-20261121\\transfer-r22\\zip.part-0019.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r22-completion-20261121\\transfer-r22\\zip.part-0020.b64",
+      "bytes": 174807,
+      "sha256": "3c130dd39979ae159fa096ef9f3f2f4e8feacdd2a05e8faffbdbedaa6ba36a4d",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r22-completion-20261121\\transfer-r22\\zip.part-0020.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r22-completion-20261121\\transfer-r22\\zip.part-0021.b64",
+      "bytes": 174807,
+      "sha256": "21486f7cbf1ec5032a9214bd121c0d3665862b23865c30db6a494860cfc85b03",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r22-completion-20261121\\transfer-r22\\zip.part-0021.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r22-completion-20261121\\transfer-r22\\zip.part-0022.b64",
+      "bytes": 174807,
+      "sha256": "da48e18013a2bb91d355f1a7f5ed39954d8215101a1cc6cafb2850abf2454900",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r22-completion-20261121\\transfer-r22\\zip.part-0022.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r22-completion-20261121\\transfer-r22\\zip.part-0023.b64",
+      "bytes": 174807,
+      "sha256": "54620ca3687a81ae8a3277668c3bc331eaa0713be411eae84a0e4c869a12b517",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r22-completion-20261121\\transfer-r22\\zip.part-0023.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r22-completion-20261121\\transfer-r22\\zip.part-0024.b64",
+      "bytes": 174807,
+      "sha256": "1726bdf1ab555c83b67d1a3a00985de6bf1d294f38fc9864b1fa498bce6edd62",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r22-completion-20261121\\transfer-r22\\zip.part-0024.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r22-completion-20261121\\transfer-r22\\zip.part-0025.b64",
+      "bytes": 174807,
+      "sha256": "b454699cdbd4016bb1bc38b690513939c94d396152507d05823c85ba8f7f9b07",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r22-completion-20261121\\transfer-r22\\zip.part-0025.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r22-completion-20261121\\transfer-r22\\zip.part-0026.b64",
+      "bytes": 174807,
+      "sha256": "799c5293ae70609c5f2f39f9344e5f764db488c14929a5dec1664df90075b321",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r22-completion-20261121\\transfer-r22\\zip.part-0026.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r22-completion-20261121\\transfer-r22\\zip.part-0027.b64",
+      "bytes": 174807,
+      "sha256": "92da36bdd699cd1be8900902caf63dacfe1285f481437a2eb2efa6a741174f79",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r22-completion-20261121\\transfer-r22\\zip.part-0027.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r22-completion-20261121\\transfer-r22\\zip.part-0028.b64",
+      "bytes": 174807,
+      "sha256": "7951ee039b9560726a6e3cff230a569b34eb7b2f0013bea6e8e3fbef6d4f3675",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r22-completion-20261121\\transfer-r22\\zip.part-0028.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r22-completion-20261121\\transfer-r22\\zip.part-0029.b64",
+      "bytes": 174807,
+      "sha256": "c66f4d49c36f4878543e9a87cb561f4c4356f150141760730e32959a6a28d292",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r22-completion-20261121\\transfer-r22\\zip.part-0029.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r22-completion-20261121\\transfer-r22\\zip.part-0030.b64",
+      "bytes": 174807,
+      "sha256": "fbaee1c218674ed8c4fbe5e14c911d38646a0d51f5f6d7e4e9fc8eb98d44b1ef",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r22-completion-20261121\\transfer-r22\\zip.part-0030.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r22-completion-20261121\\transfer-r22\\zip.part-0031.b64",
+      "bytes": 174807,
+      "sha256": "4b49ee0051f79b8af581b4b4117cb4cf0f3138a393196cd7735ff63cee701503",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r22-completion-20261121\\transfer-r22\\zip.part-0031.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r22-completion-20261121\\transfer-r22\\zip.part-0032.b64",
+      "bytes": 174807,
+      "sha256": "9a19bfa35c07b3bfa5ad3b30775deffd32a43d0b0a0bd1e9a57f314a6a8636a0",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r22-completion-20261121\\transfer-r22\\zip.part-0032.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r22-completion-20261121\\transfer-r22\\zip.part-0033.b64",
+      "bytes": 174807,
+      "sha256": "aee73e34f6bcb9dfa126f293a5ecaebd4a1153b28e0ba9b882817b04f8debc52",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r22-completion-20261121\\transfer-r22\\zip.part-0033.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r22-completion-20261121\\transfer-r22\\zip.part-0034.b64",
+      "bytes": 99245,
+      "sha256": "0e60fc051eff6d87444b65447db668d47bbdd0596b3b8c374711ad92b56aaee9",
+      "reason": "Manifest-verified chunk; combined bytes equal retained published R22 archive",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r22-completion-20261121\\transfer-r22\\zip.part-0034.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r23-current-outcome-20261121\\formatted-transfer.json",
+      "bytes": 38632,
+      "sha256": "a861f531436d9fc10e69bb3c38e74c1f19e3a8d295d69ca9d1850e8103d783f7",
+      "reason": "All three decoded formatted sources retained byte-for-byte in verified public archive",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r23-current-outcome-20261121\\formatted-transfer.json",
+      "source_absent": true,
+      "target_hash_verified": true
+    },
+    {
+      "source": "mcp-r23-current-outcome-20261121\\candidate-payload.json.gz.b64",
+      "bytes": 94225,
+      "sha256": "96c32b2289e76a45797347c4bc5fd8576775f439540e1b9c33949c92612afe76",
+      "reason": "All four original pre-format source files preserved exactly outside trash",
+      "target": "trash\\r22-r23-transfers-20261121T100434Z\\mcp-r23-current-outcome-20261121\\candidate-payload.json.gz.b64",
+      "source_absent": true,
+      "target_hash_verified": true
+    }
+  ],
+  "preserved_checks": [
+    {
+      "path": "mcp-r22-completion-20261121\\public-r22\\evidence-redacted.zip",
+      "bytes": 4530861,
+      "sha256": "ab979b12c68d9d311516dec82d0cd65cdfb901bf3de5f106debd2f1b71fec654"
+    },
+    {
+      "path": "mcp-r23-current-outcome-20261121\\public-go-linux\\evidence-redacted.zip",
+      "bytes": 1008450,
+      "sha256": "e2dce14e2374c37c9be44281af2b1d1397d48d58b61cd00740038e07c8680f61"
+    },
+    {
+      "path": "mcp-r22-completion-20261121\\linux-percent-work\\compile-control\\autostart.test.gz",
+      "bytes": 2844288,
+      "sha256": "a9ab05baf559e6298c1f494c93023cea7c530596f3d523d6f34fd61561205f65"
+    },
+    {
+      "path": "mcp-r22-completion-20261121\\linux-percent-work\\compile-control\\autostart.test",
+      "bytes": 4941662,
+      "sha256": "34304a1abcc27a252c266e09122a2c5646da517c9814a132dcf07635767d6471"
+    },
+    {
+      "path": "mcp-r22-completion-20261121\\linux-percent-work\\compile-candidate\\autostart.test.gz",
+      "bytes": 2844366,
+      "sha256": "cea9de2836227bc791c98a36b489e10a77cfdd5da5a4ca4cc8414582bdcd64a0"
+    },
+    {
+      "path": "mcp-r22-completion-20261121\\linux-percent-work\\compile-candidate\\autostart.test",
+      "bytes": 4941998,
+      "sha256": "7909a802fa287d3460127ed328c6f22a50cf2552af0acd9a81f6e61a7a3e8182"
+    },
+    {
+      "path": "mcp-r22-completion-20261121\\transfer-r22\\transfer-manifest.json",
+      "bytes": 10455,
+      "sha256": "04bf31026af77197757c5bb1bc42a1ec229c8edfedb059385a9bbd97ddb6c59a"
+    },
+    {
+      "path": "mcp-r23-current-outcome-20261121\\retained-original-inputs\\internal\\api\\install_task_rollback.go",
+      "bytes": 5855,
+      "sha256": "41bb89ca491cbf2f10dd7eb70d42cc39d1044eb43a049f134f220e3e9c70d79c"
+    },
+    {
+      "path": "mcp-r23-current-outcome-20261121\\retained-original-inputs\\internal\\api\\install_task_mutation_failure_test.go",
+      "bytes": 11496,
+      "sha256": "de285f683c0db9e4b46e2a5222cd35439e088ae029ba0c97ffef9139e6264fe1"
+    },
+    {
+      "path": "mcp-r23-current-outcome-20261121\\retained-original-inputs\\internal\\api\\install_scheduler_snapshot_test.go",
+      "bytes": 7703,
+      "sha256": "554b66722410d4d7c837d374a471b0384d1fff08290c4b18cd70d8017b05fab1"
+    },
+    {
+      "path": "mcp-r23-current-outcome-20261121\\retained-original-inputs\\internal\\api\\install.go",
+      "bytes": 215960,
+      "sha256": "4d1e92fbb7490911b41e20989fa38f2b1854c591c59b8b9bb80f73d6f5054153"
+    }
+  ],
+  "trash_emptied": false,
+  "delete_calls": 0,
+  "planned_files": 41,
+  "preserved_rechecked_after_moves": true,
+  "finished_utc": "2026-11-21T10:04:35.203511+00:00",
+  "runner_sha256": "967495833dcdfecf460250558531fab1be4ceffed32fca4f89e460cecb9ed341"
+}

@@ -1,0 +1,703 @@
+{
+  "schema": "r24-evidence-summary-v1",
+  "packaging_state": "CAPTURED_FOR_ARCHIVE",
+  "qualification_state": "PASS_SELECTED_SCOPE",
+  "issues": [],
+  "phases": [
+    {
+      "scope": "pr647",
+      "phase": "prepare",
+      "manifest_sha256": "431826a6009ae94972436c2ee1c7611e6e53900255dbc331791e55d04b15f2e1",
+      "source_head": "6de482cdd09034f71b5e091cc9e385e229cd96a2",
+      "source_tree": "a332fbfe30ea19944e119e64398f39db90ac6faa",
+      "candidate_tree": "5e0192aec3522f3dd2f1f6110910cf3274fb0b38",
+      "commands": [
+        {
+          "label": "init",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 0.05135000008158386,
+          "state": "PASS"
+        },
+        {
+          "label": "fetch-exact",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 12.203934699995443,
+          "state": "PASS"
+        },
+        {
+          "label": "checkout-exact",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 2.259757600026205,
+          "state": "PASS"
+        },
+        {
+          "label": "gofmt-check",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 0.018402400077320635,
+          "state": "PASS"
+        }
+      ],
+      "recorded_state": "complete",
+      "recorded_completed": true,
+      "state": "PASS"
+    },
+    {
+      "scope": "pr647",
+      "phase": "qualify",
+      "manifest_sha256": "431826a6009ae94972436c2ee1c7611e6e53900255dbc331791e55d04b15f2e1",
+      "source_head": "6de482cdd09034f71b5e091cc9e385e229cd96a2",
+      "source_tree": "a332fbfe30ea19944e119e64398f39db90ac6faa",
+      "candidate_tree": "5e0192aec3522f3dd2f1f6110910cf3274fb0b38",
+      "commands": [
+        {
+          "label": "test-1-default",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 90.1866880999878,
+          "kind": "test",
+          "root_pass_events": 4,
+          "root_pass_counts": {
+            "TestSerenaBuildEnvironmentWindowsExecutablePolicy": 1,
+            "TestSerenaBuildEnvironment_CatalogUnbufferedIsRuntimeOnly": 1,
+            "TestSerenaBuildEnvironment_PythonDeclarationBoundary": 1,
+            "TestSerenaNetworkProjectionOriginalContext": 1
+          },
+          "test_and_subtest_pass_events": 21,
+          "unique_pass_test_names": 21,
+          "leaf_pass_events": 19,
+          "unique_pass_leaf_names": 19,
+          "package_pass_events": 1,
+          "fail_events": 0,
+          "skip_events": 0,
+          "state": "PASS"
+        },
+        {
+          "label": "test-1-state-tag",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 47.69340320001356,
+          "kind": "test",
+          "root_pass_events": 4,
+          "root_pass_counts": {
+            "TestSerenaBuildEnvironmentWindowsExecutablePolicy": 1,
+            "TestSerenaBuildEnvironment_CatalogUnbufferedIsRuntimeOnly": 1,
+            "TestSerenaBuildEnvironment_PythonDeclarationBoundary": 1,
+            "TestSerenaNetworkProjectionOriginalContext": 1
+          },
+          "test_and_subtest_pass_events": 21,
+          "unique_pass_test_names": 21,
+          "leaf_pass_events": 19,
+          "unique_pass_leaf_names": 19,
+          "package_pass_events": 1,
+          "fail_events": 0,
+          "skip_events": 0,
+          "state": "PASS"
+        }
+      ],
+      "recorded_state": "complete",
+      "recorded_completed": true,
+      "state": "PASS"
+    },
+    {
+      "scope": "pr647",
+      "phase": "build-vet",
+      "manifest_sha256": "431826a6009ae94972436c2ee1c7611e6e53900255dbc331791e55d04b15f2e1",
+      "source_head": "6de482cdd09034f71b5e091cc9e385e229cd96a2",
+      "source_tree": "a332fbfe30ea19944e119e64398f39db90ac6faa",
+      "candidate_tree": "5e0192aec3522f3dd2f1f6110910cf3274fb0b38",
+      "commands": [
+        {
+          "label": "build-all",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 40.10115520004183,
+          "kind": "build",
+          "state": "PASS"
+        },
+        {
+          "label": "vet-all",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 13.686195199959911,
+          "kind": "vet",
+          "state": "PASS"
+        }
+      ],
+      "recorded_state": "complete",
+      "recorded_completed": true,
+      "state": "PASS"
+    },
+    {
+      "scope": "pr643",
+      "phase": "prepare",
+      "manifest_sha256": "cfdbfa663e4b37f9f687c313839ec745d0704debd9fcae95b5afa223c84af6e2",
+      "source_head": "527574928335142d95bc073c6ca4459fef9f9f90",
+      "source_tree": "d3b2757f30983120072826916f7a0e3b4d0da251",
+      "candidate_tree": "b658184e7c7a421f973acf71f6309abb19f1b775",
+      "commands": [
+        {
+          "label": "init",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 0.060162900015711784,
+          "state": "PASS"
+        },
+        {
+          "label": "fetch-exact",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 13.825574600021355,
+          "state": "PASS"
+        },
+        {
+          "label": "checkout-exact",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 1.7370739999460056,
+          "state": "PASS"
+        },
+        {
+          "label": "gofmt-check",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 0.05462349997833371,
+          "state": "PASS"
+        }
+      ],
+      "recorded_state": "complete",
+      "recorded_completed": true,
+      "state": "PASS"
+    },
+    {
+      "scope": "pr643",
+      "phase": "qualify",
+      "manifest_sha256": "cfdbfa663e4b37f9f687c313839ec745d0704debd9fcae95b5afa223c84af6e2",
+      "source_head": "527574928335142d95bc073c6ca4459fef9f9f90",
+      "source_tree": "d3b2757f30983120072826916f7a0e3b4d0da251",
+      "candidate_tree": "b658184e7c7a421f973acf71f6309abb19f1b775",
+      "commands": [
+        {
+          "label": "test-1-default",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 46.550139200058766,
+          "kind": "test",
+          "root_pass_events": 10,
+          "root_pass_counts": {
+            "TestSerenaOwnedTreeCleanupDeadline": 1,
+            "TestSerenaOwnedTreeCleanupParentBinding": 1,
+            "TestSerenaOwnedTreeCleanupBorrowedNamespaceKeepsOriginalIssuer": 1,
+            "TestSerenaOwnedTreeCleanupRefusesBeforeParentObservation": 1,
+            "TestSerenaOwnedTreeCleanupRejectsPublishedReader": 1,
+            "TestSerenaOwnedTreeCleanupClosedOwnerDoesNotReopen": 1,
+            "TestSerenaOwnedTreeCleanupStickyCloseFailurePreventsNewObservation": 1,
+            "TestSerenaOwnedTreeReadonlyHardlinkDeletion": 1,
+            "TestSerenaOwnedTreeRemovalOpenRejectsPublishedReader": 1,
+            "TestSerenaOwnedTreeObserveStreamsNative": 1
+          },
+          "test_and_subtest_pass_events": 56,
+          "unique_pass_test_names": 56,
+          "leaf_pass_events": 52,
+          "unique_pass_leaf_names": 52,
+          "package_pass_events": 1,
+          "fail_events": 0,
+          "skip_events": 0,
+          "state": "PASS"
+        },
+        {
+          "label": "test-1-state-tag",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 39.17139579996001,
+          "kind": "test",
+          "root_pass_events": 10,
+          "root_pass_counts": {
+            "TestSerenaOwnedTreeCleanupDeadline": 1,
+            "TestSerenaOwnedTreeCleanupParentBinding": 1,
+            "TestSerenaOwnedTreeCleanupBorrowedNamespaceKeepsOriginalIssuer": 1,
+            "TestSerenaOwnedTreeCleanupRefusesBeforeParentObservation": 1,
+            "TestSerenaOwnedTreeCleanupRejectsPublishedReader": 1,
+            "TestSerenaOwnedTreeCleanupClosedOwnerDoesNotReopen": 1,
+            "TestSerenaOwnedTreeCleanupStickyCloseFailurePreventsNewObservation": 1,
+            "TestSerenaOwnedTreeReadonlyHardlinkDeletion": 1,
+            "TestSerenaOwnedTreeRemovalOpenRejectsPublishedReader": 1,
+            "TestSerenaOwnedTreeObserveStreamsNative": 1
+          },
+          "test_and_subtest_pass_events": 56,
+          "unique_pass_test_names": 56,
+          "leaf_pass_events": 52,
+          "unique_pass_leaf_names": 52,
+          "package_pass_events": 1,
+          "fail_events": 0,
+          "skip_events": 0,
+          "state": "PASS"
+        }
+      ],
+      "recorded_state": "complete",
+      "recorded_completed": true,
+      "state": "PASS"
+    },
+    {
+      "scope": "pr643",
+      "phase": "build-vet",
+      "manifest_sha256": "cfdbfa663e4b37f9f687c313839ec745d0704debd9fcae95b5afa223c84af6e2",
+      "source_head": "527574928335142d95bc073c6ca4459fef9f9f90",
+      "source_tree": "d3b2757f30983120072826916f7a0e3b4d0da251",
+      "candidate_tree": "b658184e7c7a421f973acf71f6309abb19f1b775",
+      "commands": [
+        {
+          "label": "build-all",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 18.381979700061493,
+          "kind": "build",
+          "state": "PASS"
+        },
+        {
+          "label": "vet-all",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 8.177804399980232,
+          "kind": "vet",
+          "state": "PASS"
+        }
+      ],
+      "recorded_state": "complete",
+      "recorded_completed": true,
+      "state": "PASS"
+    },
+    {
+      "scope": "pr650",
+      "phase": "prepare",
+      "manifest_sha256": "7de97512d559ef0d6ffa99e95073c2b1f990b7709ea7972450665e11b3747e8b",
+      "source_head": "686a54c0efbe9f99cb6ffa8d6480b289c6f465bf",
+      "source_tree": "6c13b71bfa8ea66490aa49a96484e24cf6d4b3d4",
+      "candidate_tree": "712f175be713b1d27843942a31fadf8edd56e61a",
+      "commands": [
+        {
+          "label": "init",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 0.046463700011372566,
+          "state": "PASS"
+        },
+        {
+          "label": "fetch-exact",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 15.176806299947202,
+          "state": "PASS"
+        },
+        {
+          "label": "checkout-exact",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 1.1009284000610933,
+          "state": "PASS"
+        },
+        {
+          "label": "gofmt-check",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 0.2143303999910131,
+          "state": "PASS"
+        }
+      ],
+      "recorded_state": "complete",
+      "recorded_completed": true,
+      "state": "PASS"
+    },
+    {
+      "scope": "pr650",
+      "phase": "qualify",
+      "manifest_sha256": "7de97512d559ef0d6ffa99e95073c2b1f990b7709ea7972450665e11b3747e8b",
+      "source_head": "686a54c0efbe9f99cb6ffa8d6480b289c6f465bf",
+      "source_tree": "6c13b71bfa8ea66490aa49a96484e24cf6d4b3d4",
+      "candidate_tree": "712f175be713b1d27843942a31fadf8edd56e61a",
+      "commands": [
+        {
+          "label": "test-1-default",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 23.495238699950278,
+          "kind": "test",
+          "root_pass_events": 11,
+          "root_pass_counts": {
+            "TestQualificationConnectionCloseReceivesOriginalResult": 1,
+            "TestQualificationConnectionCloseReceivesOriginalIO": 1,
+            "TestQualificationSessionCloseCachesUnsettledOriginalClose": 1,
+            "TestQualificationExchangeUsesRealReceiver": 1,
+            "TestQualificationSessionCloseIsCached": 1,
+            "TestQualificationZeroObservationRefuses": 1,
+            "TestQualificationLiveBindingPassesExactDigests": 1,
+            "TestQualificationReceivedObservationDoesNotReopenEndpoint": 1,
+            "TestQualificationDialPreservesRequestBudgets": 1,
+            "TestQualificationDialRejectsInvalidRequestBudgets": 1,
+            "TestQualificationDialCancellationKeepsValidationOwned": 1
+          },
+          "test_and_subtest_pass_events": 47,
+          "unique_pass_test_names": 47,
+          "leaf_pass_events": 40,
+          "unique_pass_leaf_names": 40,
+          "package_pass_events": 1,
+          "fail_events": 0,
+          "skip_events": 0,
+          "state": "PASS"
+        },
+        {
+          "label": "test-1-state-tag",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 18.83200030005537,
+          "kind": "test",
+          "root_pass_events": 11,
+          "root_pass_counts": {
+            "TestQualificationConnectionCloseReceivesOriginalResult": 1,
+            "TestQualificationConnectionCloseReceivesOriginalIO": 1,
+            "TestQualificationSessionCloseCachesUnsettledOriginalClose": 1,
+            "TestQualificationExchangeUsesRealReceiver": 1,
+            "TestQualificationSessionCloseIsCached": 1,
+            "TestQualificationZeroObservationRefuses": 1,
+            "TestQualificationLiveBindingPassesExactDigests": 1,
+            "TestQualificationReceivedObservationDoesNotReopenEndpoint": 1,
+            "TestQualificationDialPreservesRequestBudgets": 1,
+            "TestQualificationDialRejectsInvalidRequestBudgets": 1,
+            "TestQualificationDialCancellationKeepsValidationOwned": 1
+          },
+          "test_and_subtest_pass_events": 47,
+          "unique_pass_test_names": 47,
+          "leaf_pass_events": 40,
+          "unique_pass_leaf_names": 40,
+          "package_pass_events": 1,
+          "fail_events": 0,
+          "skip_events": 0,
+          "state": "PASS"
+        }
+      ],
+      "recorded_state": "complete",
+      "recorded_completed": true,
+      "state": "PASS"
+    },
+    {
+      "scope": "pr650",
+      "phase": "build-vet",
+      "manifest_sha256": "7de97512d559ef0d6ffa99e95073c2b1f990b7709ea7972450665e11b3747e8b",
+      "source_head": "686a54c0efbe9f99cb6ffa8d6480b289c6f465bf",
+      "source_tree": "6c13b71bfa8ea66490aa49a96484e24cf6d4b3d4",
+      "candidate_tree": "712f175be713b1d27843942a31fadf8edd56e61a",
+      "commands": [
+        {
+          "label": "build-all",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 21.926156000001356,
+          "kind": "build",
+          "state": "PASS"
+        },
+        {
+          "label": "vet-all",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 9.00749679992441,
+          "kind": "vet",
+          "state": "PASS"
+        }
+      ],
+      "recorded_state": "complete",
+      "recorded_completed": true,
+      "state": "PASS"
+    },
+    {
+      "scope": "pr635",
+      "phase": "prepare",
+      "manifest_sha256": "34f4e2fd7e7b770c534bf6a02ca55b0eb6c6e10e2f0984a3e184a8cc4496c750",
+      "source_head": "1c135914c108dda8b63816175347c5da77da26d9",
+      "source_tree": "5fb1c22030791a27f74adfb0abecc09be95ec803",
+      "candidate_tree": "0c4cb2acce09b56198865915d2babbc91b67ddf5",
+      "commands": [
+        {
+          "label": "init",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 0.7721088000107557,
+          "state": "PASS"
+        },
+        {
+          "label": "fetch-exact",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 21.95825240004342,
+          "state": "PASS"
+        },
+        {
+          "label": "checkout-exact",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 1.1889035999774933,
+          "state": "PASS"
+        },
+        {
+          "label": "gofmt-check",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 0.12059549998957664,
+          "state": "PASS"
+        }
+      ],
+      "recorded_state": "complete",
+      "recorded_completed": true,
+      "state": "PASS"
+    },
+    {
+      "scope": "pr635",
+      "phase": "qualify",
+      "manifest_sha256": "34f4e2fd7e7b770c534bf6a02ca55b0eb6c6e10e2f0984a3e184a8cc4496c750",
+      "source_head": "1c135914c108dda8b63816175347c5da77da26d9",
+      "source_tree": "5fb1c22030791a27f74adfb0abecc09be95ec803",
+      "candidate_tree": "0c4cb2acce09b56198865915d2babbc91b67ddf5",
+      "commands": [
+        {
+          "label": "test-1-default",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 49.742298100027256,
+          "kind": "test",
+          "root_pass_events": 1,
+          "root_pass_counts": {
+            "TestPreparedSerenaUVDiscovery": 1
+          },
+          "test_and_subtest_pass_events": 11,
+          "unique_pass_test_names": 11,
+          "leaf_pass_events": 9,
+          "unique_pass_leaf_names": 9,
+          "package_pass_events": 1,
+          "fail_events": 0,
+          "skip_events": 0,
+          "state": "PASS"
+        },
+        {
+          "label": "test-1-state-tag",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 40.3083415000001,
+          "kind": "test",
+          "root_pass_events": 1,
+          "root_pass_counts": {
+            "TestPreparedSerenaUVDiscovery": 1
+          },
+          "test_and_subtest_pass_events": 11,
+          "unique_pass_test_names": 11,
+          "leaf_pass_events": 9,
+          "unique_pass_leaf_names": 9,
+          "package_pass_events": 1,
+          "fail_events": 0,
+          "skip_events": 0,
+          "state": "PASS"
+        }
+      ],
+      "recorded_state": "complete",
+      "recorded_completed": true,
+      "state": "PASS"
+    },
+    {
+      "scope": "pr635",
+      "phase": "build-vet",
+      "manifest_sha256": "34f4e2fd7e7b770c534bf6a02ca55b0eb6c6e10e2f0984a3e184a8cc4496c750",
+      "source_head": "1c135914c108dda8b63816175347c5da77da26d9",
+      "source_tree": "5fb1c22030791a27f74adfb0abecc09be95ec803",
+      "candidate_tree": "0c4cb2acce09b56198865915d2babbc91b67ddf5",
+      "commands": [
+        {
+          "label": "build-all",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 18.88325650000479,
+          "kind": "build",
+          "state": "PASS"
+        },
+        {
+          "label": "vet-all",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 10.669620799948461,
+          "kind": "vet",
+          "state": "PASS"
+        }
+      ],
+      "recorded_state": "complete",
+      "recorded_completed": true,
+      "state": "PASS"
+    },
+    {
+      "scope": "pr637",
+      "phase": "prepare",
+      "manifest_sha256": "0a69d4b5e7d5d12d1aeca4174233bd2493509183e97bda0349719de55991b793",
+      "source_head": "2542d63d2f917dc414a387e0ed2ceb494d118cfe",
+      "source_tree": "1270aae075885ba6ea3693c62344966779862ce0",
+      "candidate_tree": "940dfb102e62d599ac453f0afd41a1c0d3b87351",
+      "commands": [
+        {
+          "label": "init",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 0.04905749997124076,
+          "state": "PASS"
+        },
+        {
+          "label": "fetch-exact",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 19.24582580011338,
+          "state": "PASS"
+        },
+        {
+          "label": "checkout-exact",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 1.5629539000801742,
+          "state": "PASS"
+        },
+        {
+          "label": "gofmt-check",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 0.046814699890092015,
+          "state": "PASS"
+        }
+      ],
+      "recorded_state": "complete",
+      "recorded_completed": true,
+      "state": "PASS"
+    },
+    {
+      "scope": "pr637",
+      "phase": "qualify",
+      "manifest_sha256": "0a69d4b5e7d5d12d1aeca4174233bd2493509183e97bda0349719de55991b793",
+      "source_head": "2542d63d2f917dc414a387e0ed2ceb494d118cfe",
+      "source_tree": "1270aae075885ba6ea3693c62344966779862ce0",
+      "candidate_tree": "940dfb102e62d599ac453f0afd41a1c0d3b87351",
+      "commands": [
+        {
+          "label": "test-1-default",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 47.664256300078705,
+          "kind": "test",
+          "root_pass_events": 1,
+          "root_pass_counts": {
+            "TestPreparedSerenaUVDiscovery": 1
+          },
+          "test_and_subtest_pass_events": 11,
+          "unique_pass_test_names": 11,
+          "leaf_pass_events": 9,
+          "unique_pass_leaf_names": 9,
+          "package_pass_events": 1,
+          "fail_events": 0,
+          "skip_events": 0,
+          "state": "PASS"
+        },
+        {
+          "label": "test-1-state-tag",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 40.94266760000028,
+          "kind": "test",
+          "root_pass_events": 1,
+          "root_pass_counts": {
+            "TestPreparedSerenaUVDiscovery": 1
+          },
+          "test_and_subtest_pass_events": 11,
+          "unique_pass_test_names": 11,
+          "leaf_pass_events": 9,
+          "unique_pass_leaf_names": 9,
+          "package_pass_events": 1,
+          "fail_events": 0,
+          "skip_events": 0,
+          "state": "PASS"
+        },
+        {
+          "label": "test-2-default",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 2.7988515999168158,
+          "kind": "test",
+          "root_pass_events": 3,
+          "root_pass_counts": {
+            "TestQualificationBuilderRejectsAmbiguousOrOverlappingInputs": 1,
+            "TestQualificationBuildEnvironmentCannotInheritSourceOrTagOverrides": 1,
+            "TestQualificationBuildEnvironmentKeepsProxyPathLiteral": 1
+          },
+          "test_and_subtest_pass_events": 13,
+          "unique_pass_test_names": 13,
+          "leaf_pass_events": 12,
+          "unique_pass_leaf_names": 12,
+          "package_pass_events": 1,
+          "fail_events": 0,
+          "skip_events": 0,
+          "state": "PASS"
+        }
+      ],
+      "recorded_state": "complete",
+      "recorded_completed": true,
+      "state": "PASS"
+    },
+    {
+      "scope": "pr637",
+      "phase": "build-vet",
+      "manifest_sha256": "0a69d4b5e7d5d12d1aeca4174233bd2493509183e97bda0349719de55991b793",
+      "source_head": "2542d63d2f917dc414a387e0ed2ceb494d118cfe",
+      "source_tree": "1270aae075885ba6ea3693c62344966779862ce0",
+      "candidate_tree": "940dfb102e62d599ac453f0afd41a1c0d3b87351",
+      "commands": [
+        {
+          "label": "build-all",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 22.403374999994412,
+          "kind": "build",
+          "state": "PASS"
+        },
+        {
+          "label": "vet-all",
+          "exit_code": 0,
+          "settled": true,
+          "seconds": 9.55216860002838,
+          "kind": "vet",
+          "state": "PASS"
+        }
+      ],
+      "recorded_state": "complete",
+      "recorded_completed": true,
+      "state": "PASS"
+    }
+  ],
+  "observed_totals": {
+    "root_pass_events": 57,
+    "test_and_subtest_pass_events": 305,
+    "leaf_pass_events": 270,
+    "package_pass_events": 11,
+    "fail_events": 0,
+    "skip_events": 0
+  },
+  "expected": {
+    "phases": 15,
+    "candidate_go_files": 13,
+    "test_commands": 11,
+    "root_pass_events": 57,
+    "build_vet_commands": 10
+  },
+  "limits": [
+    "Exact clean source observations plus hashed Go overlay; not an executed published candidate commit.",
+    "Source checkout was not reread by this packager; source identity is checked against captured observations.",
+    "Only direct-child waits were bounded; no whole-process-tree settlement or deadline proof.",
+    "Full/default and full/tagged test gates are NOT_RUN for R24; historical FAIL results are not changed.",
+    "Retained readonly native fixtures and runtime directories are not archived or cleaned by this program.",
+    "Initial receipts and legacy manifest fields belong to the reused R21 owner; R24 scope fields bind these runs.",
+    "Tool hashes in original receipts are historical observations; no packaging-time executable snapshot is taken."
+  ],
+  "packaged_utc": "2026-11-21T11:30:20.921958+00:00"
+}

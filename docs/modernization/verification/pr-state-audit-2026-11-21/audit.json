@@ -1,0 +1,3140 @@
+{
+  "schema": "mcphub-pr-state-audit-v1",
+  "observed_at_utc": "2026-11-21T18:03:17Z",
+  "display_timezone": "Europe/Moscow",
+  "repository": "applicate2628/mcp-local-hub",
+  "master": "75dbc6406123e22468f168b861d5e0622c9d5769",
+  "previous_master": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+  "master_change": {
+    "pr": 662,
+    "merged_at": "2026-11-21T17:46:22Z",
+    "commits_from_previous": 37,
+    "changed_files": 219,
+    "performed_by_this_audit": false
+  },
+  "coverage": {
+    "all_pr_metadata": 658,
+    "closed_pr_metadata": 631,
+    "historical_merged": 484,
+    "historical_closed_unmerged": 147,
+    "open_pr_code_contract_review": 27,
+    "remote_branches": 114,
+    "historic_archives_reexecuted": false
+  },
+  "snapshot_note": "Source audit is pinned before documentation-only publication. Later own successors do not transfer runtime qualification; current PR headers record their published heads.",
+  "github_ownership": {
+    "open_pr_authors": [
+      "applicate2628"
+    ],
+    "open_pr_assignees": 0,
+    "open_pr_requested_reviewers": 0,
+    "tracked_CODEOWNERS_on_master": false,
+    "technical_owner_is_not_human_assignment": true
+  },
+  "current_head_code_review_no_findings": [
+    646,
+    649,
+    652,
+    653,
+    654,
+    655
+  ],
+  "other_current_head_review_pending": 21,
+  "master_check_run_count": 0,
+  "master_status_count": 0,
+  "architecture_evidence": {
+    "master": "75dbc6406123e22468f168b861d5e0622c9d5769",
+    "baseline_generated_from": "1b875e3ad9f0ca7d4bc306edb6c22431b66da6c7",
+    "entries": 2411,
+    "missing_path_entries": [
+      {
+        "path": "internal/gui/serena_router_handshake.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "04822571c8de570c7fcae516e55536de07fc1737b6e6dbfb2099bfec9d277a2a"
+      },
+      {
+        "path": "internal/gui/serena_router_session.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "05852d65d7122ccf4ee565b4001d120afa6a404a5faecb47fa697052630b88a6"
+      },
+      {
+        "path": "internal/gui/serena_router.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "06ae9b79913f11ebfa201b6ac24e76d7144a76c2c9aa8b2f644263a5a0095545"
+      },
+      {
+        "path": "internal/gui/serena_router_findings_test.go",
+        "kind": "file_budget",
+        "owner": "gui-adapter",
+        "fingerprint": "091c9aa159c9bc3344a741227d45e2752d0e9d7d02323f08ded53eaa8be81cfb"
+      },
+      {
+        "path": "internal/gui/serena_idle_sweeper.go",
+        "kind": "mutable_global",
+        "owner": "gui-adapter",
+        "fingerprint": "09a65ab375836935716de8b57d270b285345d578341ce1194dae7bfd3201945e"
+      },
+      {
+        "path": "internal/gui/serena_router_session.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "0c71f1814009db851ce328361e12bd33ae3e0a6f8904d559136fce8ef1f610de"
+      },
+      {
+        "path": "internal/gui/serena_router_session.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "0e2f308c2f74448b5d8c81eb4869310725e858cf70bc928e5f2ec0d34fc66d11"
+      },
+      {
+        "path": "internal/gui/lsp_router.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "117581ef3b7d7a447d1c80b07d9396c1d34eb46aa18b0ce4daa868ccbc4f0098"
+      },
+      {
+        "path": "internal/gui/serena_router.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "13c24566d4840f663d45ae13b8db3e12ba05517a234f17b5eca14f9e06b40a51"
+      },
+      {
+        "path": "internal/gui/serena_router_handshake.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "1c3ca6f910118d58ef6468d6e79a1f03f969b21cee89da8c124938b6016189a6"
+      },
+      {
+        "path": "internal/gui/serena_router.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "1e7af5ccfe56a5813b81a0cdf97dd8d443de06aa7a1d78ba812dba4546675c1e"
+      },
+      {
+        "path": "internal/gui/serena_router.go",
+        "kind": "production_test_hook",
+        "owner": "gui-adapter",
+        "fingerprint": "1f6bebe02eee1202f8afe520a88291228d6fd4ec44707df7e76ed5aacc1a2ce9"
+      },
+      {
+        "path": "internal/gui/serena_router.go",
+        "kind": "api_construction",
+        "owner": "gui-adapter",
+        "fingerprint": "25c94ac4b12eab42670a2abe2c526d1ab0ff48f335ef6354e6619b622357adab"
+      },
+      {
+        "path": "internal/gui/serena_router_session.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "273b2cb3cc33e7c198c0beed978306dbcbf14f5635b82df9ee195eb7945eb407"
+      },
+      {
+        "path": "internal/gui/serena_router.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "279c5e266f5bb23a8fe4d9288f96c065776843524b27f9844afaf98f41b4cff3"
+      },
+      {
+        "path": "internal/gui/serena_router_lifecycle.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "2a1a2b57e5b7e9f2a49e5923d535e14bfdb9c2e12bebe4ba099b4407c483b914"
+      },
+      {
+        "path": "internal/gui/lsp_router.go",
+        "kind": "api_construction",
+        "owner": "gui-adapter",
+        "fingerprint": "2ad2b10c22e28c7a16bbdda1419c1780e03f99e1725727eff6caf52dbeb59a43"
+      },
+      {
+        "path": "internal/gui/serena_router_lifecycle.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "2b5575708b299b2e6a0977e64c48ee27f81b0e36b772b4c2c18ada3270d03aee"
+      },
+      {
+        "path": "internal/gui/serena_router_handshake.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "2cfd646e2624927cb39d436c21e8799848fa48b728d9a6c35211f22cb282c532"
+      },
+      {
+        "path": "internal/gui/serena_router_session.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "2d4a76031e2e2528644c63d980d7b433f88ff5af6aadc009d8f6ae2ecda39077"
+      },
+      {
+        "path": "internal/gui/serena_router.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "307e1b4e35da0cbd29423d910103b84f5cfd427377365bc8a5184d11fc538293"
+      },
+      {
+        "path": "internal/gui/serena_router.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "3097e48216fcdcd694aa7a640ea17d268e80c7521c73d8bf53cd36014b85f0c3"
+      },
+      {
+        "path": "internal/gui/serena_router.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "3155318996a4ffb87171a86628a5ec56d2933a5f4ee91f53edf01f0f80176f62"
+      },
+      {
+        "path": "internal/gui/serena_router_handshake.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "321505133f16a1ea68a0597f870eacf1466692ba8774a32a0f2b45cebabb4a2c"
+      },
+      {
+        "path": "internal/gui/serena_router.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "345c156c17ed6b119356ce9035191ef505b654dcfafe4b2b43ec3036e624aa80"
+      },
+      {
+        "path": "internal/gui/serena_router.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "35174fc4771d08ce3dd96f2fc13a8c3c237d088de7f08b6a38fa14f79c5a901c"
+      },
+      {
+        "path": "internal/gui/serena_router_handshake.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "36661dd43ca3e8e96f82ebc482b840f07d5c13f65152b8f6bf6b75754cb13dad"
+      },
+      {
+        "path": "internal/gui/serena_router_handshake.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "3d404bfd14da5447dfe8019179025cdeb2cef02ef98fe7a80356fda79c0b5a8e"
+      },
+      {
+        "path": "internal/gui/serena_router_handshake.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "3d6dca33e4d5ec118c26c3c677a51530424a6b20581754a300a13a87139b72d0"
+      },
+      {
+        "path": "internal/gui/serena_router_session.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "3daf8b247e49e2adae617945ab4de4e23729c2108005c1c20769a35d78ebdc71"
+      },
+      {
+        "path": "internal/gui/serena_router.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "41d9c1604d3ec29f1305f830a215d871f9a6a7d76588dc0dc039b30ea276cbe6"
+      },
+      {
+        "path": "internal/gui/serena_router_lifecycle.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "49e49501f13b38ecd33b172ff12d10b328d54e18ff303c55777419c48a11b3d7"
+      },
+      {
+        "path": "internal/gui/lsp_router.go",
+        "kind": "mutable_global",
+        "owner": "gui-adapter",
+        "fingerprint": "4a30775b38937cd1940c9480a8c8a978b4477a413dcfc2b816d6b7e35b1c9db9"
+      },
+      {
+        "path": "internal/gui/serena_router_lifecycle.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "4aa4b512ee5353da2c3f0ca77dcdcdcbac4ca3abff4017f343e011d4012f983e"
+      },
+      {
+        "path": "internal/gui/serena_router_lifecycle.go",
+        "kind": "mutable_global",
+        "owner": "gui-adapter",
+        "fingerprint": "4d59f9a2d1ad13dcb4c7a970e8810f143315abc226aa62732010f2ed0d7198f5"
+      },
+      {
+        "path": "internal/gui/serena_router.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "4e9aa76fe199ae3d2630e63a2dd8e0c296ef3378ea25790172fffa26cd03d8f5"
+      },
+      {
+        "path": "internal/gui/serena_router_lifecycle.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "61a83cafcc7cfa285d1f0b4f8cc4e7e0481832fdfd71f8c270c39fee0eac230a"
+      },
+      {
+        "path": "internal/gui/serena_router_test.go",
+        "kind": "file_budget",
+        "owner": "gui-adapter",
+        "fingerprint": "6438ddba0f8c3404b2fb1da79716f77a6bc05e768d5287253f98edf0d14f29ba"
+      },
+      {
+        "path": "internal/gui/serena_router.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "690a14beb1fb8cc36ae6426ef7044233ca6fb455dece28c481dc00533cf44f62"
+      },
+      {
+        "path": "internal/gui/serena_router.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "6cf19db54d2c1e43056faecfde1491df714ce3c34caef5d5e759ca163126dd1e"
+      },
+      {
+        "path": "internal/gui/serena_router_lifecycle.go",
+        "kind": "file_budget",
+        "owner": "gui-adapter",
+        "fingerprint": "6cff90c3386c36eaea2092ade0415faaa6ceaf837d0f92a0105efbf2117c290a"
+      },
+      {
+        "path": "internal/gui/serena_router_session.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "6dc2caef6f7fddcc6e56262d6e1a118047b3fedfe5b9ce931845c4d75c8714b8"
+      },
+      {
+        "path": "internal/gui/lsp_router.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "7027ba5d4ab44a97f4362c13d722b43e4dfd1c8a797bc56ec20d836ee2e570c8"
+      },
+      {
+        "path": "internal/gui/serena_router_handshake.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "70c5383c392a615b5187d664c2fef39cdfdf11e8bcbeeb19d1588fb18eac2412"
+      },
+      {
+        "path": "internal/gui/serena_router_handshake.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "7112103a6f90fec193b9fcb3cb6f565bd86e44efbacc80fa9b28519e75153d1e"
+      },
+      {
+        "path": "internal/gui/serena_router_lifecycle.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "713662d964f022a314cf27c78abdece081e0cf994ad2a0d6e95a572e656fa19c"
+      },
+      {
+        "path": "internal/gui/serena_router_handshake.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "7147cdc499ba7743d1c01d04ca687fbda5024201bfe0f071ac31f6c5579f95a3"
+      },
+      {
+        "path": "internal/gui/serena_router.go",
+        "kind": "mutable_global",
+        "owner": "gui-adapter",
+        "fingerprint": "7522a9e3ede387d37e5bdc7487d7675696e6521c33b8146a44f42aaa98a0565c"
+      },
+      {
+        "path": "internal/gui/serena_router.go",
+        "kind": "file_budget",
+        "owner": "gui-adapter",
+        "fingerprint": "77d710fa420b1b2fa69bc1aa7794a9469d2a4dfafd74dceb5d61b055f052916f"
+      },
+      {
+        "path": "internal/gui/lsp_router.go",
+        "kind": "mutable_global",
+        "owner": "gui-adapter",
+        "fingerprint": "7811b76e28318a355e35eda12c66202816eb2d09613b69689c1dbf7befb2b3d1"
+      },
+      {
+        "path": "internal/gui/serena_router_handshake.go",
+        "kind": "mutable_global",
+        "owner": "gui-adapter",
+        "fingerprint": "7db526f3df0923638fb0cb637f5a25b3bf3530cdeda40b524879ed3fd666ce7f"
+      },
+      {
+        "path": "internal/gui/lsp_router.go",
+        "kind": "worker",
+        "owner": "gui-adapter",
+        "fingerprint": "82362e1dd2740fa6bc4cdd525c62d5c369ce014220c71dc4de19bfec62828fd4"
+      },
+      {
+        "path": "internal/gui/serena_router.go",
+        "kind": "worker",
+        "owner": "gui-adapter",
+        "fingerprint": "8310bed6105d3946ab9f893b4b6e0ed73cd28d5ebf6b6fcac47725116b635f55"
+      },
+      {
+        "path": "internal/gui/serena_router.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "86078e02487a4b9853e4fd515ad2fcaaaaa5c72176f0f3fabeaacca4d60bb683"
+      },
+      {
+        "path": "internal/gui/serena_router.go",
+        "kind": "mutable_global",
+        "owner": "gui-adapter",
+        "fingerprint": "860be519da354f55c621c2ce607ab311b3aa74f9640c493abb767e67e85c1884"
+      },
+      {
+        "path": "internal/gui/serena_router_lifecycle_test.go",
+        "kind": "file_budget",
+        "owner": "gui-adapter",
+        "fingerprint": "88091a925d4614b9544eb99b15dbde34ac35833655aaadb6b65c97efbb6abe03"
+      },
+      {
+        "path": "internal/gui/serena_router.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "8c6efdbde5bf2b482094d91b305f5234bf3206da3464d5c2badb54beca5f12ac"
+      },
+      {
+        "path": "internal/gui/serena_router_handshake.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "8d75afa86de48e87caed15b6c4c1adc4295acc22bc89891ab1ac75f031b3a868"
+      },
+      {
+        "path": "internal/gui/serena_router.go",
+        "kind": "api_construction",
+        "owner": "gui-adapter",
+        "fingerprint": "8e0c82c87e0e837fcaeb5768e716b04ce599298d696909df1f3c56ef3af9491b"
+      },
+      {
+        "path": "internal/gui/serena_router_handshake.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "8e5e99e45daa171889e5ea9436b951be58130aec7cbb89aa1f84a3109bac2bbc"
+      },
+      {
+        "path": "internal/gui/serena_router_lifecycle.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "91d17fd5b238c44223a090f40b619fd3ed52d69d6f91c40f2163f87792f639db"
+      },
+      {
+        "path": "internal/gui/serena_router.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "94bafbc9d20ae04c39b7f98ef40971035100982f1008c1a5563c93f52945efc6"
+      },
+      {
+        "path": "internal/gui/serena_router_handshake.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "97235591b9159db9800269825635bd631532ef3175c9b36f668e6fe208a3bf53"
+      },
+      {
+        "path": "internal/gui/serena_router_session.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "98b1059a29fe21a0f2676401e67d5eff59a375812a9a783403d05c6ce1b33fb2"
+      },
+      {
+        "path": "internal/gui/serena_router_handshake.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "9b92fe3a79c5096f3351b85ed5efa5f1788d1d17716f9ec782a59dd981fab843"
+      },
+      {
+        "path": "internal/gui/serena_router.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "9fda42afd46dd726362514e01c487de46daf65c6f1675f4569e6d99d38d640d1"
+      },
+      {
+        "path": "internal/gui/serena_router_handshake.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "a23b1c08db0ac98a2965f5fcdcf4674a92e349d1f88c2dc396bdc31b2fc1aa92"
+      },
+      {
+        "path": "internal/gui/serena_router_session.go",
+        "kind": "file_budget",
+        "owner": "gui-adapter",
+        "fingerprint": "a70eb49a24da3c453f65d5481ce574cd0bff683f6b80409d964cea3d268bfaf7"
+      },
+      {
+        "path": "internal/gui/serena_router_lifecycle.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "a90729f32d9ffdd85654ce083eaad9bd2e472221494f7edce51c937e89312fa9"
+      },
+      {
+        "path": "internal/gui/serena_router_handshake.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "af7f22a9bda7008c983231dd219b5882b8891da92a029feecbb63c6f7ba99537"
+      },
+      {
+        "path": "internal/gui/serena_router_handshake.go",
+        "kind": "mutable_global",
+        "owner": "gui-adapter",
+        "fingerprint": "b56ea48aee975e74b76d3f9941464a0a96de1cc087f479d0a8555154f5a60c35"
+      },
+      {
+        "path": "internal/gui/serena_router_handshake.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "b8d802b41c6e1f166d28deb47d266cd086925e8f3e5e28e01e4630732f78d462"
+      },
+      {
+        "path": "internal/gui/serena_router.go",
+        "kind": "mutable_global",
+        "owner": "gui-adapter",
+        "fingerprint": "b99daf2a2694e2dc9065880b405ed33841dabf66001f972b758ff7d90b79b980"
+      },
+      {
+        "path": "internal/gui/serena_router_session.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "bb6725c99f2fb68398ebbc3ff76a47c9a3ce907c5466fe5b91f041593270eed2"
+      },
+      {
+        "path": "internal/gui/serena_router.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "bc3e8932fc21c8bce60268f1c231ad5a5b84d0235841af3840578c90582bfe7e"
+      },
+      {
+        "path": "internal/gui/serena_router_lifecycle.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "bd5eea029c46ff84f2f2fcb1e573307015d102f3bd090914a4c10a8ce4d53351"
+      },
+      {
+        "path": "internal/gui/serena_router_lifecycle.go",
+        "kind": "mutable_global",
+        "owner": "gui-adapter",
+        "fingerprint": "c021c64b2bbca619a40bf15c921959840504f4d19d7088ef823bf6c6c1951f2a"
+      },
+      {
+        "path": "internal/gui/serena_router_handshake.go",
+        "kind": "mutable_global",
+        "owner": "gui-adapter",
+        "fingerprint": "c04edaf6fcb75a83fa5b2eec254cf68d33893d6ce1c91dbd871527eec2dda9c8"
+      },
+      {
+        "path": "internal/gui/lsp_router.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "c20b2e28de384fe90e1cf6dbf0db537c92e203f4670cb88fb955c9050d2d227d"
+      },
+      {
+        "path": "internal/gui/serena_idle_sweeper.go",
+        "kind": "mutable_global",
+        "owner": "gui-adapter",
+        "fingerprint": "c7c90ec28965cdb138538a671fe4631891366c12fdb69af65ea8706bd53ef408"
+      },
+      {
+        "path": "internal/gui/serena_idle_sweeper.go",
+        "kind": "mutable_global",
+        "owner": "gui-adapter",
+        "fingerprint": "c9bc6d640b84ceffca33c7cf6b3ffa855547506598297406dbf145b244d554cb"
+      },
+      {
+        "path": "internal/gui/serena_router_handshake.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "d142b25f980a410d670ffe6b66ca289eac14b3975b18af45b6a94bcad8264719"
+      },
+      {
+        "path": "internal/gui/serena_router_handshake.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "d6784e57214a3db22b6dee9524001440ddfceb16ab8064322aea4f8d0e53ce16"
+      },
+      {
+        "path": "internal/gui/serena_router_session.go",
+        "kind": "mutable_global",
+        "owner": "gui-adapter",
+        "fingerprint": "db311da06a7a8f000b1b72461247649c574f627067773ee2e8515d18ab253da0"
+      },
+      {
+        "path": "internal/gui/serena_router_session.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "e225190d9fc4d0265b5abc6abc6629606f0795c031d4a486586a4af86479b0de"
+      },
+      {
+        "path": "internal/gui/serena_router.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "ea895fd6ae28b084f65cb881956b4c66a450a13ec93a7bf15e3bbbcbdd5bbab4"
+      },
+      {
+        "path": "internal/gui/serena_router_lifecycle.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "eacc0fe61a88718493654a700443533b1899ea82229ad29ab7e6f796a8e5f5f4"
+      },
+      {
+        "path": "internal/gui/serena_router.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "ed59728941f13e3e7af691267041f31df6f3d61cded87db6260a425152b9fbba"
+      },
+      {
+        "path": "internal/gui/serena_router_lifecycle.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "edf37180a3bd7b13877abc5183de1189b2c58b206d9c289f6166e786b99d3038"
+      },
+      {
+        "path": "internal/gui/serena_router_lifecycle.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "ee10b3b1257ae4d3dd04c05ad9cc1f96d872e0ed15297e826debc3e511cdc528"
+      },
+      {
+        "path": "internal/gui/serena_router_session.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "f031b209021208e2e23f59eec87495186c4b0087a03a6727e9c4e9c76075e7d3"
+      },
+      {
+        "path": "internal/gui/serena_router_session.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "f43ddb67409e3ed0db2ad23782f105ee2e219a846620a055dcb194ede53af8ad"
+      },
+      {
+        "path": "internal/gui/serena_router_session.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "fa1793521c35e15d4482a103b724df11d855edfe953af8de91a45390548f64ec"
+      },
+      {
+        "path": "internal/gui/serena_router.go",
+        "kind": "history_comment",
+        "owner": "gui-adapter",
+        "fingerprint": "faf116aad5a68ac5a10795c3c76fd5908473d50e6e7d8c3e7ede298b56cca04e"
+      },
+      {
+        "path": "internal/gui/serena_idle_sweeper.go",
+        "kind": "mutable_global",
+        "owner": "gui-adapter",
+        "fingerprint": "ff601247afef6c04d15f0db875c220c53236afaaf5e768b80da026f71fd1279d"
+      },
+      {
+        "path": "internal/gui/serena_router.go",
+        "kind": "worker",
+        "owner": "gui-adapter",
+        "fingerprint": "ffedc0666cc8bacd0ccbb3fa819b139babf1910471b0156e18e371a618ef3f32"
+      }
+    ],
+    "coverage_examples": {
+      "internal/mcproute/workspace_routes.go": [],
+      "internal/mcproute/hub_listener.go": [],
+      "internal/binaryadmission/windows_product_registry_compiled.go": [],
+      "internal/api/hub_mcp_project_authority.go": [
+        "application-services"
+      ],
+      "internal/daemon/relay.go": [
+        "mcp-runtime"
+      ],
+      "internal/vcpkgmcp/cmaketrace/cmaketrace.go": [
+        "tool-runtime"
+      ]
+    },
+    "source_verified": true,
+    "archcheck_executed": false
+  },
+  "testmain": {
+    "master_declarations": 8,
+    "master_linux_only_declarations": 1,
+    "pr658_declarations_on_old_base": 11,
+    "anticipated_combined_declarations_without_constructing_tree": 12
+  },
+  "documentary_publications_completed": {
+    "627": {
+      "sha": "6615d239fe066eaa5fa78c22a5272d6602528274",
+      "tree": "b45e9e6b5e61231584c2fe9919a80cdb72e01259",
+      "blob": "10827fb11d6c122a949c55812a0b356ef120d7a3",
+      "readback": true
+    },
+    "631": {
+      "sha": "701535e3439d74495080463976d610a42303e5cf",
+      "tree": "2f0179bff4ce877afe1bae76275010877161283e"
+    }
+  },
+  "native_or_product_tests": "NOT_RUN",
+  "full_Go_gates": "NOT_RUN",
+  "architecture_command": "NOT_RUN",
+  "optional_whole_historical_whitespace_scan": {
+    "status": "CANCELED",
+    "exit_code": 130,
+    "reason": "Unnecessary repeated materialization of unchanged historical evidence; no passing result claimed."
+  },
+  "pull_requests": [
+    {
+      "number": 623,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/623",
+      "title": "docs: cross-platform Rust roadmap, COM boundaries and targeted Python reduction",
+      "state": "open",
+      "draft": true,
+      "author": "applicate2628",
+      "assignees": [],
+      "requested_reviewers": [],
+      "source_audit_head": "cd1bb62f1999a501318523b84124213c799e2bdd",
+      "documentary_successor_already_published": null,
+      "head_branch": "docs/rust-cross-platform-no-com-20261112",
+      "base_branch": "master",
+      "api_reported_base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "resolved_current_base_sha": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "actual_merge_base": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "api_mergeability_at_read": {
+        "mergeable": true,
+        "state": "clean",
+        "not_acceptance": true
+      },
+      "unique_change_disposition": "RETAIN_DRAFT_NO_WHOLE_PR_ABSORPTION_PROVED",
+      "changed_path_count_from_current_base_merge_base": 426,
+      "changed_path_blobs_equal_current_master": 0,
+      "technical_owner_paths": [
+        "docs/modernization/plans/measurement-consumers-2026-11-18.md",
+        "docs/modernization/plans/rust-independent-execution-plan-2026-11-12.md",
+        "docs/modernization/plans/rust-cross-platform-plan-2026-11-12.md",
+        "docs/modernization/verification"
+      ],
+      "contract_at_pr_head": "Keep roadmap, consumer decisions and source-bound evidence indexed without duplicating runtime implementation or current execution plan.",
+      "mechanism_at_pr_head": "Documentary branch; historical consumer map explicitly pinned to a7d92d2/18 November. Current body points to #658 as one plan but repeats obsolete no-merge/master-unchanged claims.",
+      "curation_ru": {
+        "owner": "Документация, карта потребителей и архив доказательств",
+        "contract": "Хранить исходники и результаты с точной привязкой к коммиту; текущий порядок исполнения задаёт единственный план в #658.",
+        "current": "Исторические R24/R25 сохранены. После #662 текущая база — 75dbc640, владельцы маршрутов находятся в mcproute; прежние утверждения о неизменном master относятся только к датам старых квитанций.",
+        "next": "Поддерживать актуальный индекс и границы доказательств; не перепроверять неизменные архивы без нового вопроса и не превращать эту документационную ветку в общую кодовую интеграцию."
+      },
+      "remaining_work": [
+        "Add short #662 current owner/contract delta and link latest single plan.",
+        "Distinguish mcproute code extraction from aggregate and sweeper authority.",
+        "Record automatic prune preservation and no production consumers for new project enrollment functions.",
+        "Keep historical R24/R25 hashes, counts and failures intact.",
+        "Single architecture owner reconciles relocated fingerprints and missing mcproute/binaryadmission debt-owner/import policy; do not blanket rebaseline or infer runtime ownership from registry."
+      ],
+      "source_findings": [
+        {
+          "id": "C4",
+          "classification": "stale_current_status",
+          "paths": [
+            "PR623 body"
+          ],
+          "consequence": "master=a7d92d2 and no merge are no longer current."
+        },
+        {
+          "id": "C6",
+          "classification": "stale_live_owner_documentation",
+          "paths": [
+            "internal/cli/gui.go:1322-1327@75dbc640",
+            "internal/cli/gui.go:1785ff@75dbc640"
+          ],
+          "consequence": "Old auto-removal comments contradict active Automatic preservation in API; do not repeat in current architecture map."
+        },
+        {
+          "id": "C7",
+          "classification": "static_architecture_registry_drift",
+          "paths": [
+            "architecture/baseline.yaml",
+            "architecture/owners.yaml",
+            "architecture/workers.yaml",
+            "architecture/policy.yaml"
+          ],
+          "consequence": "96 accepted-debt entries reference deleted gui paths; path-sensitive identities now stale, new packages lack assignment rules. Actual archcheck execution not performed."
+        }
+      ],
+      "evidence_limits": [
+        "Read main index/consumer and plan claims; did not reread all archived evidence.",
+        "Documentation and merged source do not qualify runtime or installed Product."
+      ],
+      "review": {
+        "number": 623,
+        "head": "cd1bb62f1999a501318523b84124213c799e2bdd",
+        "status": "REVIEW_PENDING",
+        "head_receipts": [],
+        "head_summary": [],
+        "historical_summary": [],
+        "inline_head_count": 0,
+        "pagination_complete": true
+      },
+      "submitted_reviews": 6,
+      "inline_comments": 0,
+      "conversation_comments": 20,
+      "review_pages_complete": true,
+      "github_status_count": 0,
+      "github_check_run_count": 0,
+      "runtime_build_test_execution_in_this_audit": "NOT_RUN"
+    },
+    {
+      "number": 624,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/624",
+      "title": "test(perf): expand CMake trace benchmarks through bounded public output",
+      "state": "open",
+      "draft": true,
+      "author": "applicate2628",
+      "assignees": [],
+      "requested_reviewers": [],
+      "source_audit_head": "81dcf67db013ba2879878c2ee6fe07aa0bb4aec3",
+      "documentary_successor_already_published": null,
+      "head_branch": "perf/rx01-cmaketrace-benchmark-20261112",
+      "base_branch": "master",
+      "api_reported_base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "resolved_current_base_sha": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "actual_merge_base": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "api_mergeability_at_read": {
+        "mergeable": null,
+        "state": "unknown",
+        "not_acceptance": true
+      },
+      "unique_change_disposition": "RETAIN_DRAFT_NO_WHOLE_PR_ABSORPTION_PROVED",
+      "changed_path_count_from_current_base_merge_base": 9,
+      "changed_path_blobs_equal_current_master": 0,
+      "technical_owner_paths": [
+        "internal/vcpkgmcp/cmaketrace/cmaketrace.go",
+        "internal/vcpkgmcp/cmaketrace/parse_benchmark_test.go",
+        "internal/vcpkgmcp/cmaketrace/trace_benchmark_contract_test.go",
+        "internal/vcpkgmcp/cmaketrace/trace_retained_records_test.go",
+        "internal/vcpkgmcp/vcpkgserver/tools.go",
+        "internal/vcpkgmcp/publicresult/publicresult.go"
+      ],
+      "contract_at_pr_head": "Keep whole-input derived indexes, filter/cap returned Records, clear discarded backing references after indexes, preserve bounded public JSON.",
+      "mechanism_at_pr_head": "Sole production caller is vcpkgserver.cmakeTraceTool -> Trace -> publicresult.MarshalIndent -> MCP TextContent. Parser does not invoke CMake. Returned 1000-record default and 256 KiB JSON budget are different boundaries.",
+      "curation_ru": {
+        "owner": "internal/vcpkgmcp/cmaketrace → vcpkgserver → publicresult",
+        "contract": "Индексы строятся по полному входу; фильтр и предел сокращают возвращаемые Records, а отброшенные ссылки очищаются. Предел записей и бюджет публичного JSON — разные ограничения.",
+        "current": "Производственный файл на master остался на исходном поведении; исправление удержания хвоста и измерительные фикстуры не поглощены. R25 измерял удержанную память конкретных входов, не пиковую память продукта.",
+        "next": "Измерить реальный запрос потребителя: удержанную и пиковую память, ограниченную параллельность и задержки при неизменных входах; сохранить семантическое сравнение ответа."
+      },
+      "remaining_work": [
+        "Choose representative consumer input and public projection requirements.",
+        "Measure peak versus retained memory and controlled concurrency/latency; keep R25 exact-input evidence historical.",
+        "Required full source-bound gates and external review remain separate."
+      ],
+      "source_findings": [],
+      "evidence_limits": [
+        "Static audit only; no benchmarks or tests executed.",
+        "Historic R25 retention observations are not full-head, peak-memory or product-budget qualification."
+      ],
+      "review": {
+        "number": 624,
+        "head": "81dcf67db013ba2879878c2ee6fe07aa0bb4aec3",
+        "status": "REVIEW_PENDING",
+        "head_receipts": [],
+        "head_summary": [],
+        "historical_summary": [],
+        "inline_head_count": 0,
+        "pagination_complete": true
+      },
+      "submitted_reviews": 1,
+      "inline_comments": 0,
+      "conversation_comments": 0,
+      "review_pages_complete": true,
+      "github_status_count": 0,
+      "github_check_run_count": 0,
+      "runtime_build_test_execution_in_this_audit": "NOT_RUN"
+    },
+    {
+      "number": 625,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/625",
+      "title": "spike(rust): qualify process-owner lifecycle, launch context and native failures",
+      "state": "open",
+      "draft": true,
+      "author": "applicate2628",
+      "assignees": [],
+      "requested_reviewers": [],
+      "source_audit_head": "287a7772a4be75ed9fb2f9ba1feb68cf035ed907",
+      "documentary_successor_already_published": null,
+      "head_branch": "spike/rx02-native-process-owner-20261112",
+      "base_branch": "master",
+      "api_reported_base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "resolved_current_base_sha": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "actual_merge_base": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "api_mergeability_at_read": {
+        "mergeable": null,
+        "state": "unknown",
+        "not_acceptance": true
+      },
+      "unique_change_disposition": "RETAIN_DRAFT_NO_WHOLE_PR_ABSORPTION_PROVED",
+      "changed_path_count_from_current_base_merge_base": 14,
+      "changed_path_blobs_equal_current_master": 0,
+      "technical_owner_paths": [
+        "experiments/rust-process-owner/src/windows.rs",
+        "experiments/rust-process-owner/src/launch_context.rs",
+        "experiments/rust-process-owner/src/native_failure_tests.rs",
+        "experiments/rust-process-owner/tests/"
+      ],
+      "contract_at_pr_head": "One Rust NativeOwner retains the original Job, process and primary-thread handles from suspended, at-create Job assignment. Admission, termination and terminal close are single-attempt transitions; timeout retains ownership; root exit is distinct from zero Job members; cleanup failure is a terminal value, not successful settlement.",
+      "mechanism_at_pr_head": "Windows-only experiment. Borrowed stdio handles are validated and allowlisted without changing caller flags or closing caller objects. Complete explicit environment and absolute working-directory context are encoded before effects. finish shares a finite deadline across root and Job settlement, then explicitly closes all original slots once and caches every close error. Drop is only best-effort kill-on-close.",
+      "curation_ru": {
+        "owner": "experiments/rust-process-owner: NativeOwner",
+        "contract": "Один владелец удерживает исходные Job/process/thread handles; ожидание корневого процесса отличается от завершения дерева. Явное закрытие сохраняет каждую ошибку; Drop не является доказательством завершения.",
+        "current": "Эксперимент не подключён к производственному Go-владельцу. Является основанием #644; новый Go master уже имеет собственные AtCreateJobProcess и допуск Product по удерживаемому процессу.",
+        "next": "Выбрать одного настоящего потребителя и согласовать исходное владение, ввод/вывод, отмену и закрытие. Сначала сопоставить отдельно принадлежащую работу wait/close; не создавать второй производственный владелец."
+      },
+      "remaining_work": [
+        "Choose a real product consumer and explicitly map Go creator identity, member custody, retirement, error domains and caller I/O lifetimes before any integration.",
+        "Keep blocked-I/O cancellation, in-create crashes and still-unqualified allocation/security/attribute-update failures separate from the completed native failure cases.",
+        "Do not duplicate the separately owned a217c779 wait/close work; first obtain and compare its source."
+      ],
+      "source_findings": [],
+      "evidence_limits": [
+        "This audit executed no native tests. Historical 53-check records include distinct source revisions and debug/release schedules; the R23 current-head debug record is not product acceptance.",
+        "Actual reduced-access/protected-close fixtures qualify their enumerated schedules; a test-owned recovery handle may be closed after removing its own protection. That does not authorize retry of an arbitrary failed CloseHandle in product code.",
+        "The missing-image first-call handle delta remains explicitly unexplained; repeated warm runs being stable does not prove the first delta harmless.",
+        "No ARM64, non-Windows implementation or whole-product acceptance is established."
+      ],
+      "review": {
+        "number": 625,
+        "head": "287a7772a4be75ed9fb2f9ba1feb68cf035ed907",
+        "status": "REVIEW_PENDING",
+        "head_receipts": [],
+        "head_summary": [],
+        "historical_summary": [],
+        "inline_head_count": 0,
+        "pagination_complete": true
+      },
+      "submitted_reviews": 1,
+      "inline_comments": 0,
+      "conversation_comments": 2,
+      "review_pages_complete": true,
+      "github_status_count": 0,
+      "github_check_run_count": 0,
+      "runtime_build_test_execution_in_this_audit": "NOT_RUN"
+    },
+    {
+      "number": 626,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/626",
+      "title": "test(perf): relay workload and executable-size control before Rust migration",
+      "state": "open",
+      "draft": true,
+      "author": "applicate2628",
+      "assignees": [],
+      "requested_reviewers": [],
+      "source_audit_head": "04e1e19650318725850225ebadc521cbf97dadd9",
+      "documentary_successor_already_published": null,
+      "head_branch": "perf/rx01-relay-baseline-20261112",
+      "base_branch": "master",
+      "api_reported_base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "resolved_current_base_sha": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "actual_merge_base": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "api_mergeability_at_read": {
+        "mergeable": null,
+        "state": "unknown",
+        "not_acceptance": true
+      },
+      "unique_change_disposition": "RETAIN_DRAFT_NO_WHOLE_PR_ABSORPTION_PROVED",
+      "changed_path_count_from_current_base_merge_base": 9,
+      "changed_path_blobs_equal_current_master": 0,
+      "technical_owner_paths": [
+        "internal/daemon/relay_benchmark_test.go",
+        "internal/daemon/relay_load_test.go",
+        "internal/daemon/relay_binary_probe_windows_test.go",
+        "internal/daemon/relay_private_memory_probe_windows_test.go",
+        "internal/daemon/testdata/relay-minimal/main.go"
+      ],
+      "contract_at_pr_head": "Semantic JSON-RPC response oracle and controlled workload; reject duplicate extra responses and wrong protocol version. Minimal executable is a control, not a qualified Product.",
+      "mechanism_at_pr_head": "GET fixture is 405; stream workload exercises POST-SSE. Production Relay and dependencies are unchanged in this PR. It does not include #629 input-owner bootstrap.",
+      "curation_ru": {
+        "owner": "internal/daemon: измерения Relay и минимальный executable-control",
+        "contract": "Нагрузка проверяет точное содержание JSON-RPC ответов, отсутствие лишних ответов и версии протокола; минимальный executable остаётся контрольным образцом.",
+        "current": "GET в текущей фикстуре возвращает 405; потоковые проверки относятся к POST-SSE. Производственное исправление #629 не входит в эту ветку автоматически.",
+        "next": "Добавить репрезентативный длительный GET-SSE и переподключение, ограничения параллельности, отмену и ошибки вывода. Измерять точный выбранный источник с #629; прежние 1/8/32 процесса не равны установленной топологии."
+      },
+      "remaining_work": [
+        "Real sustained GET-SSE/reconnect and bounded concurrent workers.",
+        "Cancellation/output failure and open-loop tail-latency workload.",
+        "Pin combined #629 source explicitly when measuring its behavior.",
+        "Do not treat six adapter classes or historical 1/8/32 process experiments as installed cardinality."
+      ],
+      "source_findings": [],
+      "evidence_limits": [
+        "Static audit only.",
+        "Historical full Go FAIL source-bound; no current master reproduction.",
+        "Minimal control lacks full Product/discovery admission."
+      ],
+      "review": {
+        "number": 626,
+        "head": "04e1e19650318725850225ebadc521cbf97dadd9",
+        "status": "REVIEW_PENDING",
+        "head_receipts": [],
+        "head_summary": [],
+        "historical_summary": [],
+        "inline_head_count": 0,
+        "pagination_complete": true
+      },
+      "submitted_reviews": 1,
+      "inline_comments": 0,
+      "conversation_comments": 1,
+      "review_pages_complete": true,
+      "github_status_count": 0,
+      "github_check_run_count": 0,
+      "runtime_build_test_execution_in_this_audit": "NOT_RUN"
+    },
+    {
+      "number": 627,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/627",
+      "title": "spike(rust): anchored verified file reader with native replacement and cap tests",
+      "state": "open",
+      "draft": true,
+      "author": "applicate2628",
+      "assignees": [],
+      "requested_reviewers": [],
+      "source_audit_head": "3d5bcdbffec44efe3ea862815bd58666b7f62c5b",
+      "documentary_successor_already_published": "6615d239fe066eaa5fa78c22a5272d6602528274",
+      "head_branch": "spike/rx04-anchored-read-20261112",
+      "base_branch": "master",
+      "api_reported_base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "resolved_current_base_sha": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "actual_merge_base": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "api_mergeability_at_read": {
+        "mergeable": true,
+        "state": "clean",
+        "not_acceptance": true
+      },
+      "unique_change_disposition": "RETAIN_DRAFT_NO_WHOLE_PR_ABSORPTION_PROVED",
+      "changed_path_count_from_current_base_merge_base": 10,
+      "changed_path_blobs_equal_current_master": 0,
+      "technical_owner_paths": [
+        "experiments/rust-anchored-read/src/windows.rs",
+        "experiments/rust-anchored-read/src/read_tests.rs",
+        "experiments/rust-anchored-read/README.md",
+        "docs/modernization/verification/reader-native-read-2026-11-21/"
+      ],
+      "contract_at_pr_head": "Windows beneath-root reader retains native directory/file handles, opens each child relative to the retained parent, rejects reparses, enforces a 1 MiB cap including growth and verifies a required SHA-256 digest. It returns zeroizing owned bytes only after verified read and successful explicit cleanup; all failures return no partial byte result.",
+      "mechanism_at_pr_head": "At most two handles coexist during child acquisition. The algorithm acquires the next handle before closing the parent, reads with a remaining-cap plus one-byte sentinel, then hashes the exact bytes. Cancellation is sampled between native operations; already-blocked ReadFile is not interrupted. The new actual read-failure fixture locks byte 4096 through a separate file handle, causes Win32 error 33 after a successful 4096-byte read, unlocks explicitly and proves a subsequent complete read.",
+      "curation_ru": {
+        "owner": "experiments/rust-anchored-read: read_verified",
+        "contract": "Читать ограниченный объём и считать SHA-256 через исходные удерживаемые дескрипторы; не возвращать частичные байты при ошибке чтения или закрытия.",
+        "current": "Это Windows-эксперимент без продуктового адаптера. 16 библиотечных тестов относятся к указанному кандидату и исходным байтам в квитанции; новая правка исправляет только ссылку README на существующее доказательство.",
+        "next": "Сохранить контракт Go-потребителей: различение отсутствия и отказа, причины отмены, необязательный digest для backup и предел 16 МиБ там, где он требуется. Проверить реальные stat/parent-close/final-close и сочетания ошибок на собственных фикстурах."
+      },
+      "remaining_work": [
+        "Before any adapter, preserve errors.Is(os.ErrNotExist), wrapped cancellation causes, empty-digest behavior and existing backup caps at actual Go consumers.",
+        "Qualify separately owned native post-acquisition stat errors, parent/final close errors and combined primary plus cleanup errors.",
+        "Keep performance unclaimed; there is no product wiring or demonstrated speedup.",
+        "No further link fix required: root published and verified the one-line correction at 6615d239. Preserve the runtime-source and historical qualification limits."
+      ],
+      "source_findings": [
+        {
+          "id": "N627-DOC-1",
+          "classification": "confirmed documentation defect",
+          "severity": "P3",
+          "head": "3d5bcdbffec44efe3ea862815bd58666b7f62c5b",
+          "location": "experiments/rust-anchored-read/README.md:45",
+          "condition": "A reader follows the execution record and source identities link.",
+          "consequence": "The relative target resolves under experiments/rust-anchored-read/evidence/README.md, which is absent, instead of the committed verification record.",
+          "recommendation": "Replace only the link target with ../../docs/modernization/verification/reader-native-read-2026-11-21/README.md. Runtime files, evidence manifests and historical qualification remain unchanged.",
+          "status": "Resolved by documentation-only publication; executable source and ABI definitions unchanged.",
+          "resolution_evidence": "Parent reports exact readback and unchanged native source/tests/evidence bytes.",
+          "resolution": {
+            "status": "FIXED_DOCUMENTATION_ONLY",
+            "commit": "6615d239fe066eaa5fa78c22a5272d6602528274"
+          }
+        }
+      ],
+      "evidence_limits": [
+        "No runtime execution in this audit. The 16-test receipt is for the recorded exported base plus overlays; executed source identities match the published relevant source, but there was no independent rerun of the already-published head.",
+        "The current 16 comprises the historical 15 plus one new native read-error case; they are not 31 unique tests.",
+        "Injected hook failures, stable handle counts, and the new locked-byte schedule do not establish all native failure or cleanup branches.",
+        "Windows drive-absolute roots only; UNC/device roots and other platforms are unsupported. No ACL policy or FFI integration is implemented."
+      ],
+      "review": {
+        "number": 627,
+        "head": "3d5bcdbffec44efe3ea862815bd58666b7f62c5b",
+        "status": "REVIEW_PENDING",
+        "head_receipts": [],
+        "head_summary": [],
+        "historical_summary": [],
+        "inline_head_count": 0,
+        "pagination_complete": true
+      },
+      "submitted_reviews": 2,
+      "inline_comments": 0,
+      "conversation_comments": 0,
+      "review_pages_complete": true,
+      "github_status_count": 0,
+      "github_check_run_count": 0,
+      "runtime_build_test_execution_in_this_audit": "NOT_RUN"
+    },
+    {
+      "number": 628,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/628",
+      "title": "fix(status): observe Windows process identity and RSS through one handle",
+      "state": "open",
+      "draft": true,
+      "author": "applicate2628",
+      "assignees": [],
+      "requested_reviewers": [],
+      "source_audit_head": "00f120a533f0e0e4bc7b6a56871528ff6dd9fde4",
+      "documentary_successor_already_published": null,
+      "head_branch": "perf/rx16-native-observation-20261112",
+      "base_branch": "master",
+      "api_reported_base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "resolved_current_base_sha": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "actual_merge_base": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "api_mergeability_at_read": {
+        "mergeable": null,
+        "state": "unknown",
+        "not_acceptance": true
+      },
+      "unique_change_disposition": "RETAIN_DRAFT_NO_WHOLE_PR_ABSORPTION_PROVED",
+      "changed_path_count_from_current_base_merge_base": 18,
+      "changed_path_blobs_equal_current_master": 0,
+      "technical_owner_paths": [
+        "internal/process/pid_status.go",
+        "internal/process/pid_status_windows.go",
+        "internal/process/process_rss_windows.go",
+        "internal/cli/supervise_status.go",
+        "internal/cli/supervise_liveness.go",
+        "internal/cli/supervise_status_process_windows.go",
+        "internal/cli/supervise_status_process_other.go"
+      ],
+      "contract_at_pr_head": "Status-only observation verifies expected PID, image and process creation time and obtains optional resident set size (RSS) through one retained query/synchronize process handle, with zero waits before and after. Unknown or mandatory query/close failure cannot yield usable memory or a successful identity observation.",
+      "mechanism_at_pr_head": "Per-status-request observation replaces separate liveness, identity and memory probes for a row while reusing the canonical liveness predicate. Pending-stop RSS is admitted only when receipt PID/start/generation matches runtime snapshot. Optional memory failure does not invalidate an otherwise proven live identity. No second PID-based RSS fallback is allowed in the one-handle branch; non-Windows keeps the prior scalar path.",
+      "curation_ru": {
+        "owner": "internal/process + cli/supervise_status: наблюдение состояния",
+        "contract": "Один удерживаемый process handle связывает PID, образ, время создания и необязательный RSS. Данные stopPending действуют только для совпавшего поколения и исходной квитанции.",
+        "current": "Наблюдение состояния не предоставляет полномочий остановки. Отказ обязательного запроса может отображаться прежним Restarting/current_pid=0, но сам не изменяет управляющее состояние. #659 имеет иной управляющий контракт.",
+        "next": "Сохранить одного владельца кода и передавать измерения другим пакетам как закреплённый результат; отдельно проверить реальные нагрузки, переиспользование PID и нативные отказы без второго скалярного обхода."
+      },
+      "remaining_work": [
+        "Preserve tracker and pending-stop generation ownership, proof-change refusal and one observation per row/request.",
+        "Measure real status workloads before making performance claims; maintain native PID reuse and exit-race evidence separately from mocked projection tests.",
+        "Keep required-query unknown presentation explicit: existing Restarting/current_pid=0 projection is display behavior, not permission to restart."
+      ],
+      "source_findings": [],
+      "evidence_limits": [
+        "No tests or benchmarks executed in this audit. Historical focused/native/overlay passes are not a fresh current-master or whole-product pass.",
+        "Historical full Go/state-tagged runs failed or timed out; do not overwrite those outcomes with focused counts.",
+        "One handle binds identity and RSS to one process object, not to one atomic timestamp. Optional memory failures remain best-effort; no PID-reuse prevention for unrelated control paths is added."
+      ],
+      "review": {
+        "number": 628,
+        "head": "00f120a533f0e0e4bc7b6a56871528ff6dd9fde4",
+        "status": "REVIEW_PENDING",
+        "head_receipts": [],
+        "head_summary": [],
+        "historical_summary": [],
+        "inline_head_count": 0,
+        "pagination_complete": true
+      },
+      "submitted_reviews": 3,
+      "inline_comments": 0,
+      "conversation_comments": 1,
+      "review_pages_complete": true,
+      "github_status_count": 0,
+      "github_check_run_count": 0,
+      "runtime_build_test_execution_in_this_audit": "NOT_RUN"
+    },
+    {
+      "number": 629,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/629",
+      "title": "fix(relay): retain output failures and join owner-authorized stdin interruption",
+      "state": "open",
+      "draft": true,
+      "author": "applicate2628",
+      "assignees": [],
+      "requested_reviewers": [],
+      "source_audit_head": "b3646f19706d795a8b0c0dafb2193d7dc6f4c584",
+      "documentary_successor_already_published": null,
+      "head_branch": "fix/relay-output-failure-contract-20261113",
+      "base_branch": "master",
+      "api_reported_base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "resolved_current_base_sha": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "actual_merge_base": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "api_mergeability_at_read": {
+        "mergeable": null,
+        "state": "unknown",
+        "not_acceptance": true
+      },
+      "unique_change_disposition": "RETAIN_DRAFT_NO_WHOLE_PR_ABSORPTION_PROVED",
+      "changed_path_count_from_current_base_merge_base": 13,
+      "changed_path_blobs_equal_current_master": 0,
+      "technical_owner_paths": [
+        "cmd/mcphub/main.go",
+        "internal/cli/relay.go",
+        "internal/cli/relay_process_input.go",
+        "internal/cli/relay_process_input_windows.go",
+        "internal/cli/relay_process_input_other.go",
+        "internal/daemon/relay.go"
+      ],
+      "contract_at_pr_head": "Explicit input-owner capability; join original read and interruption; retain first stdout frame/short-write failure, cancel HTTP work, stop further writes and join workers. Delivery failure does not authorize replay.",
+      "mechanism_at_pr_head": "Executable grants private inherited-stdin wrapper; Windows synchronous pipe has retained thread/cancellation owner. Borrowed/default, console, file, overlapped and non-Windows readers do not gain interruption. SSE retry attempts charged after session wait.",
+      "curation_ru": {
+        "owner": "cmd/mcphub → cli/relay_process_input → daemon/relay",
+        "contract": "Право прервать stdin выдаёт исходный владелец ввода. Первая ошибка stdout сохраняется, HTTP-работы отменяются, исходное чтение и прерывание присоединяются к завершению; ошибка доставки не разрешает повтор эффекта.",
+        "current": "Новый master не поглотил исправление. Существующий остаток: HTTP JSON/error body читается без полного предела, SSE ограничивает строку, но не целое событие; ошибка SSE-парсера теряется.",
+        "next": "Ограничить ответ и целое событие и передавать причину отказа без повторной отправки неопределённого эффекта; проверить реальный GET-SSE/reconnect совместно с #626. Unix/ARM64 и блокирующий stdout остаются отдельными границами."
+      },
+      "remaining_work": [
+        "Document and address inherited HTTP response/SSE event bounds separately.",
+        "Preserve parser errors in GET/POST-SSE without replaying uncertain effects.",
+        "Native Unix/ARM64, blocked stdout and callback refusal remain unqualified.",
+        "Source-bound full Go gates and combined workload."
+      ],
+      "source_findings": [
+        {
+          "id": "C2",
+          "classification": "pre_existing_residual_defect",
+          "severity": "P2",
+          "paths": [
+            "internal/daemon/relay.go:343-359",
+            "internal/daemon/relay.go:443-500"
+          ],
+          "condition": "Endpoint sends unbounded JSON/error body or many bounded SSE data lines before event separator.",
+          "consequence": "Memory grows without a complete response/event cap despite 1 MiB input lines and 64-worker limit."
+        },
+        {
+          "id": "C3",
+          "classification": "pre_existing_residual_defect",
+          "severity": "P2",
+          "paths": [
+            "internal/daemon/relay.go:443-447",
+            "internal/daemon/relay.go:501-515"
+          ],
+          "condition": "SSE parser receives scanner/read failure without stdout write failure.",
+          "consequence": "readSSEStream discards parser error; pipeSSE only returns stdoutFailure, so failure reason is not propagated."
+        }
+      ],
+      "evidence_limits": [
+        "No runtime/native execution.",
+        "C2/C3 are pre-existing residual behavior, not regressions introduced by #629.",
+        "Historical #630 already incorporated in ancestry; no second owner needed."
+      ],
+      "review": {
+        "number": 629,
+        "head": "b3646f19706d795a8b0c0dafb2193d7dc6f4c584",
+        "status": "REVIEW_PENDING",
+        "head_receipts": [],
+        "head_summary": [],
+        "historical_summary": [],
+        "inline_head_count": 0,
+        "pagination_complete": true
+      },
+      "submitted_reviews": 1,
+      "inline_comments": 0,
+      "conversation_comments": 4,
+      "review_pages_complete": true,
+      "github_status_count": 0,
+      "github_check_run_count": 0,
+      "runtime_build_test_execution_in_this_audit": "NOT_RUN"
+    },
+    {
+      "number": 631,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/631",
+      "title": "spike(ffi): qualify versioned original-process identity across Go and Rust",
+      "state": "open",
+      "draft": true,
+      "author": "applicate2628",
+      "assignees": [],
+      "requested_reviewers": [],
+      "source_audit_head": "412cd353d495a890b47992c0eae672a247862508",
+      "documentary_successor_already_published": "701535e3439d74495080463976d610a42303e5cf",
+      "head_branch": "spike/rx02-go-rust-boundary-20261113",
+      "base_branch": "spike/rx02-native-identity-20261114",
+      "api_reported_base_sha": "71891067d0c24387ba873a3e4276b0462ae365ae",
+      "resolved_current_base_sha": "1cf5754b81c850a3569be269642b49605895eeb2",
+      "actual_merge_base": "71891067d0c24387ba873a3e4276b0462ae365ae",
+      "api_mergeability_at_read": {
+        "mergeable": false,
+        "state": "dirty",
+        "not_acceptance": true
+      },
+      "unique_change_disposition": "RETAIN_DRAFT_NO_WHOLE_PR_ABSORPTION_PROVED",
+      "changed_path_count_from_current_base_merge_base": 61,
+      "changed_path_blobs_equal_current_master": 0,
+      "technical_owner_paths": [
+        "experiments/rust-process-owner/ffi/src/lib.rs",
+        "experiments/rust-process-owner/ffi/src/identity.rs",
+        "experiments/rust-process-owner/ffi/include/owner_v1.h",
+        "experiments/rust-process-owner/ffi/include/identity_v1.h",
+        "experiments/rust-process-owner/ffi/go/"
+      ],
+      "contract_at_pr_head": "Standalone Go-to-C-to-Rust foreign-function interface (FFI) transports the same Rust owner. Owner ABI version 1 and identity protocol version 1 are independent contracts. The Go adapter owns DLL references and live owner slots, serializes each owner, copies borrowed callback data, retains ownership on malformed late metadata, and disallows unloading while owners remain.",
+      "mechanism_at_pr_head": "The loader requires version/create/admit/stop/finish/release/admit_checked/create_env/create_io. Only admit_identity1 and query_identity1 are optional independently; an unsupported query returns its own typed error and never falls back to admission. FinishContext cancels a polling observer while retaining the owner; it neither stops the child nor closes caller I/O. Explicit environment defaults to empty, not parent inheritance. NewWithStdio duplicates and closes only temporary inheritable copies.",
+      "curation_ru": {
+        "owner": "experiments/rust-process-owner/ffi: Go ↔ C ↔ Rust",
+        "contract": "Адаптер передаёт того же исходного владельца, удерживает DLL до освобождения owners и различает версию ABI владельца и версии протоколов идентичности.",
+        "current": "Базовая загрузка требует девять экспортов, включая mh_admit_checked1; только admit_identity1/query_identity1 необязательны независимо. Комментарий заголовка исправлен, README согласован с текущим родителем #644 с сохранением уникальных пояснений. Определения ABI и исполняемые исходники прежние.",
+        "next": "Выбрать настоящего потребителя CreatorIdentity/Product и проверить передачу исходного владения и результатов завершения. FinishContext отменяет наблюдателя ожидания, но не останавливает процесс и не закрывает чужой ввод/вывод."
+      },
+      "remaining_work": [
+        "Design and implement one actual Hub consumer boundary before product qualification, including original owner custody, query/terminal exclusion, cancellation, EOF, cleanup-error transport and Product file admission.",
+        "Keep the nine required exports as the documented ABI1 loader baseline; describe the two optional identity exports separately.",
+        "README alignment and the admit_checked header comment are resolved at 701535e3439d74495080463976d610a42303e5cf; exact file readback and unchanged ABI definitions were verified. Runtime qualification is not extended."
+      ],
+      "source_findings": [
+        {
+          "id": "N631-DOC-1",
+          "classification": "documentation inconsistency",
+          "severity": "P3",
+          "head": "412cd353d495a890b47992c0eae672a247862508",
+          "location": "experiments/rust-process-owner/ffi/include/owner_v1.h:73 versus ffi/go/bridge_windows.go:38-44",
+          "condition": "A C/Go consumer reads the header description of mh_admit_checked1 as optional and supplies a DLL lacking it.",
+          "consequence": "The actual Go loader rejects the DLL before owner creation, contrary to that local comment. The current README correctly identifies the required baseline.",
+          "recommendation": "State that the export is additive to the original layout but required by this Go loader baseline; preserve the independently optional identity extensions.",
+          "status": "Resolved by documentation-only publication; executable source and ABI definitions unchanged.",
+          "resolution": {
+            "status": "FIXED_DOCUMENTATION_ONLY",
+            "commit": "701535e3439d74495080463976d610a42303e5cf"
+          }
+        }
+      ],
+      "evidence_limits": [
+        "No FFI, race or native execution in this audit. Historical R23 debug Rust/Go race results are on the recorded runtime-source revision; docs-only successors do not create fresh runtime runs.",
+        "FinishContext uses nonblocking owner-lock attempts and Finish(0), but cannot interrupt a native call already executing; QueryIdentity has no deadline parameter.",
+        "C pointers, buffer validity and nonaliasing are caller obligations. This interface is not a memory-safety boundary against arbitrary hostile pointers.",
+        "No broad legacy ABI1 compatibility is proved: DLLs missing any of the nine required baseline exports are rejected.",
+        "Historical full Go and state-tagged failures remain failures; the standalone module evidence does not make the Hub ready."
+      ],
+      "review": {
+        "number": 631,
+        "head": "412cd353d495a890b47992c0eae672a247862508",
+        "status": "REVIEW_PENDING",
+        "head_receipts": [],
+        "head_summary": [],
+        "historical_summary": [],
+        "inline_head_count": 0,
+        "pagination_complete": true
+      },
+      "submitted_reviews": 2,
+      "inline_comments": 0,
+      "conversation_comments": 2,
+      "review_pages_complete": true,
+      "github_status_count": 0,
+      "github_check_run_count": 0,
+      "runtime_build_test_execution_in_this_audit": "NOT_RUN"
+    },
+    {
+      "number": 632,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/632",
+      "title": "fix(serena): discover UV from the qualified execution PATH",
+      "state": "open",
+      "draft": true,
+      "author": "applicate2628",
+      "assignees": [],
+      "requested_reviewers": [],
+      "source_audit_head": "ff4ba7f85fef35e19b39dced17d9df47bb9237a0",
+      "documentary_successor_already_published": null,
+      "head_branch": "fix/serena-qualified-uv-path-20261114",
+      "base_branch": "master",
+      "api_reported_base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "resolved_current_base_sha": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "actual_merge_base": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "api_mergeability_at_read": {
+        "mergeable": null,
+        "state": "unknown",
+        "not_acceptance": true
+      },
+      "unique_change_disposition": "RETAIN_DRAFT_NO_WHOLE_PR_ABSORPTION_PROVED",
+      "changed_path_count_from_current_base_merge_base": 2,
+      "changed_path_blobs_equal_current_master": 0,
+      "technical_owner_paths": [
+        "internal/api/serena_prepared_inputs.go",
+        "internal/api/serena_prepared_uv_discovery_test.go"
+      ],
+      "contract_at_pr_head": "Qualified execution PATH owns uv discovery priority. Empty PATH elements cannot become the current directory; ambient exec.LookPath cannot replace the issued environment. Discovery returns only a candidate; later image/digest/version/interpreter checks still own admission.",
+      "mechanism_at_pr_head": "discoverPreparedSerenaUV searches explicit nonempty PATH directories in order, then declared discovery hints. Windows tries uv.exe then uv. Stat-only discovery and environment-expanded hints do not establish executable authority.",
+      "curation_ru": {
+        "owner": "internal/api/serena_prepared_inputs: обнаружение uv",
+        "contract": "Приоритет задаёт выданный PATH; пустой компонент не означает текущий каталог. Обнаружение кандидата не заменяет последующий допуск исходного файла и образа.",
+        "current": "Исправление не вошло в master. Цепочка #632 → #635 → #637 сохраняется; необходимые проверки PATH уже перенесены в потомков, что не означает совпадения их истории с текущей головой родителя.",
+        "next": "Сохранять проверку пустых компонентов при согласовании цепочки. Новый uv/Python и исходный образ квалифицировать только для выбранного актуального источника."
+      },
+      "remaining_work": [
+        "Preserve empty-component regression while reconciling the 632→635→637 stack; copies of this guard in descendants are propagated ownership, not new ancestry.",
+        "After any source reconciliation, run the anchored discovery root in default and test_state_path_env modes; qualification of actual uv/interpreter belongs to the new current-source integration, not inert-file unit tests."
+      ],
+      "source_findings": [],
+      "evidence_limits": [
+        "Read-only source and test audit; no build, vet, Go test, native Windows, network installation, quota agent, or Product execution performed in this audit. Historical passes keep their exact source/image/overlay and selector limits. Current reviews and CI are classified separately by root from current GitHub receipts; no blanket REVIEW_PENDING label is applied.",
+        "R24 current-tree-equivalent overlay ran the discovery root in default and state-tagged profiles plus compilation/vet. Older broad evidence on 68843d/8cead does not qualify ff4ba7 or master+PR integration. Tests create inert candidate files and do not prove a Windows executable launch."
+      ],
+      "review": {
+        "number": 632,
+        "head": "ff4ba7f85fef35e19b39dced17d9df47bb9237a0",
+        "status": "REVIEW_PENDING",
+        "head_receipts": [],
+        "head_summary": [],
+        "historical_summary": [
+          {
+            "id": 6882735088,
+            "url": "https://github.com/applicate2628/mcp-local-hub/pull/632#issuecomment-6882735088",
+            "updated_at": "2026-11-14T19:10:18Z",
+            "code_review": {
+              "commit_sha": "8cead428a6cee57c597e2bd3ed7b3877a6445d30",
+              "has_any_findings": false,
+              "has_unresolved_findings": false,
+              "status": "completed"
+            },
+            "security_review": {
+              "commit_sha": null,
+              "has_any_findings": null,
+              "has_unresolved_findings": null,
+              "status": null
+            }
+          }
+        ],
+        "inline_head_count": 0,
+        "pagination_complete": true
+      },
+      "submitted_reviews": 1,
+      "inline_comments": 0,
+      "conversation_comments": 4,
+      "review_pages_complete": true,
+      "github_status_count": 0,
+      "github_check_run_count": 0,
+      "runtime_build_test_execution_in_this_audit": "NOT_RUN"
+    },
+    {
+      "number": 635,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/635",
+      "title": "test(serena): build a source-issued native qualification publisher",
+      "state": "open",
+      "draft": true,
+      "author": "applicate2628",
+      "assignees": [],
+      "requested_reviewers": [],
+      "source_audit_head": "f639b97ccc56eb18d314d52951d1b5d167d11e5f",
+      "documentary_successor_already_published": null,
+      "head_branch": "fix/serena-qualification-publisher-20261114",
+      "base_branch": "fix/serena-qualified-uv-path-20261114",
+      "api_reported_base_sha": "8cead428a6cee57c597e2bd3ed7b3877a6445d30",
+      "resolved_current_base_sha": "ff4ba7f85fef35e19b39dced17d9df47bb9237a0",
+      "actual_merge_base": "8cead428a6cee57c597e2bd3ed7b3877a6445d30",
+      "api_mergeability_at_read": {
+        "mergeable": true,
+        "state": "clean",
+        "not_acceptance": true
+      },
+      "unique_change_disposition": "RETAIN_DRAFT_NO_WHOLE_PR_ABSORPTION_PROVED",
+      "changed_path_count_from_current_base_merge_base": 16,
+      "changed_path_blobs_equal_current_master": 0,
+      "technical_owner_paths": [
+        "tools/test-serena-publisher/main_windows.go",
+        "internal/binaryadmission/source_prepare.go",
+        "internal/binaryadmission/windows_pe.go",
+        "internal/binaryadmission/windows_versioninfo.go"
+      ],
+      "contract_at_pr_head": "An exact clean source export issues a separately identifiable Serena qualification executable. PE metadata parsing recognizes its dedicated role; ordinary Product/CLI/windowless admission still rejects it. Success requires source verification, original native/IO settlement, image identity, and closed build inputs.",
+      "mechanism_at_pr_head": "Builder uses private disjoint roots, retained no-reparse/no-share-delete path handles, source snapshot checks, local cache-only module proxy, controlled Go build inputs, go test -c with serena_qualification and test_state_path_env, bounded contained stages, final PE/source admission and proof readback. Unreplaced ambient environment remains inherited.",
+      "curation_ru": {
+        "owner": "tools/test-serena-publisher + binaryadmission/source_prepare",
+        "contract": "Отдельный издатель выпускает квалификационный образ из полного чистого источника с исходной идентичностью, контролируемой средой и завершёнными нативными операциями.",
+        "current": "Исторические замечания о пропущенных staged deletions и GOAMD64/GOFIPS140 исправлены и сохранены также в #637. Квалификационный образ не является обычным Windows Product; посторонняя среда не полностью очищается.",
+        "next": "Сохранить проверку полного списка исходников и фиксированные параметры сборки; выпускать новый исходно привязанный образ после выбора текущей композиции и входов Serena 2.1.0. Старый бинарник не квалифицирует master 75dbc640."
+      },
+      "remaining_work": [
+        "Maintain #632→#635→#637 base order without claiming current parent heads are ancestors. Preserve clean-source staged-deletion and GOAMD64/GOFIPS140/telemetry guards.",
+        "Issue a new source-bound publisher and current Product pair when authorized integration scope is fixed; the old image cannot certify master 75dbc640 or upstream Serena 2.1.0.",
+        "Use exact publisher helper roots and a native issued-image qualification only where source/builder inputs changed; retain existing full-suite and external gate limitations."
+      ],
+      "source_findings": [
+        {
+          "id": "S635-retained-review-fixes",
+          "category": "verified_review_closure",
+          "severity": "information",
+          "pin": "f639b97ccc56eb18d314d52951d1b5d167d11e5f",
+          "file": "internal/binaryadmission/source_prepare.go",
+          "lines": "547–556",
+          "condition": "A committed path was staged for deletion, whether or not its physical bytes remain.",
+          "consequence": "The clean-source observation is marked dirty. This retains the historical review fix, also present in #637.",
+          "related": "tools/test-serena-publisher/main_windows.go:325–335 pins GOAMD64=v1, GOFIPS140=off and clears telemetry child/test overrides in both heads."
+        }
+      ],
+      "evidence_limits": [
+        "Read-only source and test audit; no build, vet, Go test, native Windows, network installation, quota agent, or Product execution performed in this audit. Historical passes keep their exact source/image/overlay and selector limits. Current reviews and CI are classified separately by root from current GitHub receipts; no blanket REVIEW_PENDING label is applied.",
+        "Current #635 R24 selected the propagated UV discovery root and build/vet; it did not rerun all native publisher issuance. Historical publisher receipts and source epochs remain tied to their original tree.",
+        "Builder environment is controlled for declared Go/source/cache/telemetry controls, not an absolute clean-room environment: unrelated ambient entries are inherited at main_windows.go:337–346."
+      ],
+      "review": {
+        "number": 635,
+        "head": "f639b97ccc56eb18d314d52951d1b5d167d11e5f",
+        "status": "REVIEW_PENDING",
+        "head_receipts": [],
+        "head_summary": [],
+        "historical_summary": [
+          {
+            "id": 6882876800,
+            "url": "https://github.com/applicate2628/mcp-local-hub/pull/635#issuecomment-6882876800",
+            "updated_at": "2026-11-14T19:42:26Z",
+            "code_review": {
+              "commit_sha": "6ca53c83aa4f8ccca9bc0eae3d91f3fff9ede109",
+              "has_any_findings": false,
+              "has_unresolved_findings": false,
+              "status": "completed"
+            },
+            "security_review": {
+              "commit_sha": null,
+              "has_any_findings": null,
+              "has_unresolved_findings": null,
+              "status": null
+            }
+          }
+        ],
+        "inline_head_count": 0,
+        "pagination_complete": true
+      },
+      "submitted_reviews": 3,
+      "inline_comments": 4,
+      "conversation_comments": 9,
+      "review_pages_complete": true,
+      "github_status_count": 0,
+      "github_check_run_count": 0,
+      "runtime_build_test_execution_in_this_audit": "NOT_RUN"
+    },
+    {
+      "number": 637,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/637",
+      "title": "test(serena): run positive migration fixtures through real preparation",
+      "state": "open",
+      "draft": true,
+      "author": "applicate2628",
+      "assignees": [],
+      "requested_reviewers": [],
+      "source_audit_head": "1ebe00c5dbac448488d980072e689b1126875dde",
+      "documentary_successor_already_published": null,
+      "head_branch": "fix/serena-integration-qualification-20261114",
+      "base_branch": "fix/serena-qualification-publisher-20261114",
+      "api_reported_base_sha": "f639b97ccc56eb18d314d52951d1b5d167d11e5f",
+      "resolved_current_base_sha": "f639b97ccc56eb18d314d52951d1b5d167d11e5f",
+      "actual_merge_base": "6ca53c83aa4f8ccca9bc0eae3d91f3fff9ede109",
+      "api_mergeability_at_read": {
+        "mergeable": true,
+        "state": "clean",
+        "not_acceptance": true
+      },
+      "unique_change_disposition": "RETAIN_DRAFT_NO_WHOLE_PR_ABSORPTION_PROVED",
+      "changed_path_count_from_current_base_merge_base": 30,
+      "changed_path_blobs_equal_current_master": 0,
+      "technical_owner_paths": [
+        "internal/api/serena_qualification_namespace_windows.go",
+        "internal/api/serena_qualification_namespace_directory_windows.go",
+        "internal/api/serena_publisher_role*.go",
+        "internal/api/state_dir_resolution_observed*.go",
+        "internal/cli/migrate_serena_prepared_fixture*.go",
+        "internal/cli/migrate_serena_test.go",
+        "internal/cli/serena_qualification_namespace_lifetime_windows_test.go"
+      ],
+      "contract_at_pr_head": "Only a source-issued, dedicated Windows qualification image with both build tags and a real testing runtime may borrow a private retained namespace. Its original directory identities, source, principal, environment and finite observation deadline remain bound until close. Ordinary builds cannot convert serialized qualification data into authority.",
+      "mechanism_at_pr_head": "Scope creates no directories; it validates existing private run/state roots, retains native path chain, enforces one active scope, invalidates borrowed observations before reverse-order close, and keeps close debt sticky. Fixtures use a separately admitted Product and actual prepared-runtime installation/qualification; supervisor reaping/start/reconcile remain stubs. Embedded catalog supplies only command/base_args to preserve fixture-specific declaration shape.",
+      "curation_ru": {
+        "owner": "Serena qualification namespace + cli migration fixtures",
+        "contract": "Только специально выпущенный тестовый образ может заимствовать исходное приватное пространство с удержанными каталогами, правами и неизменяемым сроком действия.",
+        "current": "Четырнадцать файлов закрытого донора #636 сохранены побайтно. Миграционные фикстуры используют настоящую подготовку, но часть supervisor lifecycle подменена; обычный неподходящий образ получает SERENA_QUALIFICATION_REQUIRED.",
+        "next": "Согласовать цепочку #632/#635/#637 и новый образ; квалифицировать нужные положительные сценарии на актуальном pin Serena, сохранив настоящие права и сроки пространства. Объяснить поведение обязательного обычного Go-набора без пропусков и ослабления допуска."
+      },
+      "remaining_work": [
+        "Keep #636 source/evidence and the 14 retained blobs; do not reopen duplicate scope work. Preserve propagated #632 empty-PATH and #635 telemetry guards when stack is reconciled.",
+        "Rebuild the source-issued qualification image and separately admitted Product from the chosen current source. Exercise original namespace lifetime, changed environment, cancellation, overlapping/reopened scope and mandatory positive migration roots against Serena 2.1.0.",
+        "Resolve/report the deliberate ordinary-build SERENA_QUALIFICATION_REQUIRED failures in the mandatory default/state full-suite matrix; do not silently skip or claim a pass from selected tests.",
+        "Use internal/mcproute as current routing/lifecycle consumer owner; old internal/gui route tests are historical locations."
+      ],
+      "source_findings": [
+        {
+          "id": "S637-ordinary-suite-prerequisite",
+          "category": "verified_evidence_limit",
+          "severity": "gate",
+          "pin": "1ebe00c5dbac448488d980072e689b1126875dde",
+          "file": "internal/cli/migrate_serena_prepared_fixture_unsupported_test.go",
+          "condition": "Positive prepared migration roots run outside the dedicated issued qualification image.",
+          "consequence": "The helper fails with SERENA_QUALIFICATION_REQUIRED rather than fabricating authority or skipping. Mandatory ordinary full-suite readiness therefore cannot be inferred from the selected R24 successes."
+        }
+      ],
+      "evidence_limits": [
+        "Read-only source and test audit; no build, vet, Go test, native Windows, network installation, quota agent, or Product execution performed in this audit. Historical passes keep their exact source/image/overlay and selector limits. Current reviews and CI are classified separately by root from current GitHub receipts; no blanket REVIEW_PENDING label is applied.",
+        "R24 selected only the UV discovery root in default/state modes plus three publisher helper roots and build/vet. It did not rerun native namespace lifetime or all positive integration tests.",
+        "Native namespace tests use real handles, ACL changes and junctions, but API tests deliberately cannot issue publisher success. The marked CLI lifetime test covers original deadline/scope identity; later full installation evidence is a separate authority.",
+        "Historical combined 4c600ef4 smoke exercises installation/Ready/intent with supervisor stubs; it cannot qualify updated Serena pin, router topology or real supervisor lifecycle."
+      ],
+      "review": {
+        "number": 637,
+        "head": "1ebe00c5dbac448488d980072e689b1126875dde",
+        "status": "REVIEW_PENDING",
+        "head_receipts": [],
+        "head_summary": [],
+        "historical_summary": [
+          {
+            "id": 6882876677,
+            "url": "https://github.com/applicate2628/mcp-local-hub/pull/637#issuecomment-6882876677",
+            "updated_at": "2026-11-14T20:38:57Z",
+            "code_review": {
+              "commit_sha": "84615d465c54d52588ac17c37174d68096d0da90",
+              "has_any_findings": false,
+              "has_unresolved_findings": false,
+              "status": "completed"
+            },
+            "security_review": {
+              "commit_sha": null,
+              "has_any_findings": null,
+              "has_unresolved_findings": null,
+              "status": null
+            }
+          }
+        ],
+        "inline_head_count": 0,
+        "pagination_complete": true
+      },
+      "submitted_reviews": 0,
+      "inline_comments": 0,
+      "conversation_comments": 20,
+      "review_pages_complete": true,
+      "github_status_count": 0,
+      "github_check_run_count": 0,
+      "runtime_build_test_execution_in_this_audit": "NOT_RUN"
+    },
+    {
+      "number": 643,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/643",
+      "title": "fix(serena): keep cleanup within its captured parent lifetime",
+      "state": "open",
+      "draft": true,
+      "author": "applicate2628",
+      "assignees": [],
+      "requested_reviewers": [],
+      "source_audit_head": "44f9a3a9332c716fcd5dba5c7098df5cbf1d3c60",
+      "documentary_successor_already_published": null,
+      "head_branch": "fix/serena-cleanup-parent-observation-20261114",
+      "base_branch": "master",
+      "api_reported_base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "resolved_current_base_sha": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "actual_merge_base": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "api_mergeability_at_read": {
+        "mergeable": true,
+        "state": "clean",
+        "not_acceptance": true
+      },
+      "unique_change_disposition": "RETAIN_DRAFT_NO_WHOLE_PR_ABSORPTION_PROVED",
+      "changed_path_count_from_current_base_merge_base": 9,
+      "changed_path_blobs_equal_current_master": 0,
+      "technical_owner_paths": [
+        "internal/api/serena_owned_tree.go",
+        "internal/api/serena_owned_tree_windows.go",
+        "internal/api/serena_prepared_acquisition.go",
+        "internal/api/serena_prepared_inputs.go",
+        "internal/api/serena_qualification_resources.go"
+      ],
+      "contract_at_pr_head": "Cleanup may acquire a fresh parent-policy observation within the immutable acquisition cleanup deadline while preserving the original owned root, directory identity, source/principal/environment and sticky resource debt. This cannot renew work authority, reopen a closed scope or delete a published read-only tree.",
+      "mechanism_at_pr_head": "AbsoluteCleanupDeadline is captured by every owned-tree acquisition. Cleanup observes the same existing parent without creation, validates original/fresh binding and stricter policy compatibility, and uses that observation for cleanup inventories. Stream EOF is empty success only while context remains live. Deletion uses disposition DELETE|IGNORE_READONLY_ATTRIBUTE on an owned removal handle, preserving shared hardlink attributes.",
+      "curation_ru": {
+        "owner": "internal/api/serena_owned_tree: очистка исходного дерева",
+        "contract": "Новая проверка родителя для очистки остаётся в исходном AbsoluteCleanupDeadline и не обновляет рабочие полномочия. Ошибки закрытия и неизвестный результат остаются незавершённостью.",
+        "current": "Изменения закрытых #645/#651 уже включены: пустое перечисление потоков и удаление собственных readonly-элементов. Общие acquisition-файлы пересекаются с #648/#652 по разным обязанностям.",
+        "next": "Сохранить исходное дерево, сроки очистки и запрет подмены полномочий при согласовании acquisition. Нужна отдельная квалификация поздней очистки исходного пространства и нативных ошибок, а не повтор прежних проверок ради даты."
+      },
+      "remaining_work": [
+        "When reconciling shared acquisition structs with #648/#652, preserve cleanup deadline propagation and original authority constraints.",
+        "Select native cleanup/stream/unlink roots for any changed tree mechanism. Full later-context original-scope cleanup remains a distinct native integration obligation; policy-only tests do not establish it.",
+        "Keep unknown close, reparse/hardlink stream accounting, post-deletion absence and cancellation failures sticky."
+      ],
+      "source_findings": [],
+      "evidence_limits": [
+        "Read-only source and test audit; no build, vet, Go test, native Windows, network installation, quota agent, or Product execution performed in this audit. Historical passes keep their exact source/image/overlay and selector limits. Current reviews and CI are classified separately by root from current GitHub receipts; no blanket REVIEW_PENDING label is applied.",
+        "R24 ran ten selected roots in each default/state mode plus build/vet on matching overlay tree. Native streams and hardlink tests exercise real OS operations; cleanup parent-binding tests largely exercise data predicates and negative admission.",
+        "No positive full issued later-context cleanup, replacement-scope success or real acquisition-close-error matrix is established solely by these tests."
+      ],
+      "review": {
+        "number": 643,
+        "head": "44f9a3a9332c716fcd5dba5c7098df5cbf1d3c60",
+        "status": "REVIEW_PENDING",
+        "head_receipts": [],
+        "head_summary": [],
+        "historical_summary": [
+          {
+            "id": 6883655243,
+            "url": "https://github.com/applicate2628/mcp-local-hub/pull/643#issuecomment-6883655243",
+            "updated_at": "2026-11-14T20:22:39Z",
+            "code_review": {
+              "commit_sha": "5002fc643c80cabaab20c1b36483fd9ac2aaa09d",
+              "has_any_findings": false,
+              "has_unresolved_findings": false,
+              "status": "completed"
+            },
+            "security_review": {
+              "commit_sha": null,
+              "has_any_findings": null,
+              "has_unresolved_findings": null,
+              "status": null
+            }
+          }
+        ],
+        "inline_head_count": 0,
+        "pagination_complete": true
+      },
+      "submitted_reviews": 1,
+      "inline_comments": 0,
+      "conversation_comments": 4,
+      "review_pages_complete": true,
+      "github_status_count": 0,
+      "github_check_run_count": 0,
+      "runtime_build_test_execution_in_this_audit": "NOT_RUN"
+    },
+    {
+      "number": 644,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/644",
+      "title": "spike(rust): observe original process identity while retaining ownership",
+      "state": "open",
+      "draft": true,
+      "author": "applicate2628",
+      "assignees": [],
+      "requested_reviewers": [],
+      "source_audit_head": "1cf5754b81c850a3569be269642b49605895eeb2",
+      "documentary_successor_already_published": null,
+      "head_branch": "spike/rx02-native-identity-20261114",
+      "base_branch": "spike/rx02-native-process-owner-20261112",
+      "api_reported_base_sha": "c5672f49f65713c7555e8841e46de75b045da5f8",
+      "resolved_current_base_sha": "287a7772a4be75ed9fb2f9ba1feb68cf035ed907",
+      "actual_merge_base": "c5672f49f65713c7555e8841e46de75b045da5f8",
+      "api_mergeability_at_read": {
+        "mergeable": false,
+        "state": "dirty",
+        "not_acceptance": true
+      },
+      "unique_change_disposition": "RETAIN_DRAFT_NO_WHOLE_PR_ABSORPTION_PROVED",
+      "changed_path_count_from_current_base_merge_base": 28,
+      "changed_path_blobs_equal_current_master": 0,
+      "technical_owner_paths": [
+        "experiments/rust-process-owner/src/windows.rs",
+        "experiments/rust-process-owner/src/token_user.rs",
+        "experiments/rust-process-owner/src/native_failure_tests.rs",
+        "experiments/rust-process-owner/tests/lifecycle.rs"
+      ],
+      "contract_at_pr_head": "ProcessView is a synchronous immutable borrow of the existing original process and original Job, not a new PID lookup or owner. It returns raw image text, the at-create-bound creation time, exact-Job membership, zero-wait state and copied primary-token SID. Query failure never becomes absence, false membership or a new identity binding.",
+      "mechanism_at_pr_head": "process_view does not consume admission or publish a root wait result. It remains available after admission denial or root exit while the owner is retained, and refuses after any termination attempt or terminal settlement. Token acquisition is temporary; buffer bounds, alignment and SID extent are validated before copy, and failed token close suppresses a successful identity result while retaining observation/cleanup causes.",
+      "curation_ru": {
+        "owner": "experiments/rust-process-owner: ProcessView и TokenUser",
+        "contract": "Неизменяемое заимствование исходного process/Job выдаёт образ, время создания, членство и скопированный SID; это наблюдение, не второй владелец и не новый поиск по PID.",
+        "current": "Цепочка #625 → #644 → #631 сохранена. Дрейф текущего #625 — документационный; исправленный текст про Drop/close уже имеется. Оставшийся конфликт README связан с окончанием файла и продолженной библиографией, не с ABI.",
+        "next": "Сохранить полезную библиографию и явно учитывать документальный конфликт при дальнейшем разрешённом согласовании. Для продукта нужен конкретный принимающий Go-владелец, исключающий query после терминального состояния."
+      },
+      "remaining_work": [
+        "Map the immutable observation to existing Go CreatorIdentity and resource-custody/retirement contracts with a real consumer.",
+        "Preserve distinctions among initial creation-time acquisition failure, later query failure, a signaled process and a terminated owner.",
+        "Keep the inherited EOF-only README conflict explicit; it contains no missing parent qualification. Do not rearrange/delete the numbered bibliography merely for a green mergeability indicator."
+      ],
+      "source_findings": [],
+      "evidence_limits": [
+        "No native rerun in this audit. Historical process-view debug qualification and earlier SID debug/release records are different schedules; do not claim the newest full view has a fresh release qualification.",
+        "Current #625 after the stack fork changes only README; source equality, rather than a stale-base label, is the relevant compatibility fact."
+      ],
+      "review": {
+        "number": 644,
+        "head": "1cf5754b81c850a3569be269642b49605895eeb2",
+        "status": "REVIEW_PENDING",
+        "head_receipts": [],
+        "head_summary": [],
+        "historical_summary": [],
+        "inline_head_count": 0,
+        "pagination_complete": true
+      },
+      "submitted_reviews": 1,
+      "inline_comments": 0,
+      "conversation_comments": 0,
+      "review_pages_complete": true,
+      "github_status_count": 0,
+      "github_check_run_count": 0,
+      "runtime_build_test_execution_in_this_audit": "NOT_RUN"
+    },
+    {
+      "number": 646,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/646",
+      "title": "fix(serena): prefer qualified system Python discovery",
+      "state": "open",
+      "draft": true,
+      "author": "applicate2628",
+      "assignees": [],
+      "requested_reviewers": [],
+      "source_audit_head": "1df32782e7ade719e1d7f8c6153b4455a6ea740a",
+      "documentary_successor_already_published": null,
+      "head_branch": "fix/serena-python-discovery-preference-20261114",
+      "base_branch": "master",
+      "api_reported_base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "resolved_current_base_sha": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "actual_merge_base": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "api_mergeability_at_read": {
+        "mergeable": null,
+        "state": "unknown",
+        "not_acceptance": true
+      },
+      "unique_change_disposition": "RETAIN_DRAFT_NO_WHOLE_PR_ABSORPTION_PROVED",
+      "changed_path_count_from_current_base_merge_base": 2,
+      "changed_path_blobs_equal_current_master": 0,
+      "technical_owner_paths": [
+        "internal/api/serena_preparation_policy.go",
+        "internal/api/serena_preparation_policy_test.go"
+      ],
+      "contract_at_pr_head": "Interpreter discovery requests system-preferred selection while retaining offline/no-download/no-project policy and subsequent qualified-file/ABI checks.",
+      "mechanism_at_pr_head": "Adds --python-preference system to uv python find alongside --no-project --system --no-config --no-python-downloads --offline and the minimum version requirement. The selected explicit interpreter path is later passed to installation.",
+      "curation_ru": {
+        "owner": "internal/api/serena_preparation_policy: выбор Python",
+        "contract": "Запрашивать system-preferred interpreter, сохраняя offline/no-download/no-project и последующую квалификацию выбранного файла.",
+        "current": "Изменение аргументов uv не поглощено master. Предпочтение системного Python не означает запрета всех managed interpreters или всех обращений к реестру Windows.",
+        "next": "Сохранить точное утверждение аргументов; проверить выбранную связку uv/Python/Serena 2.1.0 при разрешённой актуальной установке. Исторический выбор интерпретатора не переносить на новый источник."
+      },
+      "remaining_work": [
+        "Keep exact argv assertion. Requalify selection only on the selected current uv/interpreter/source combination when installation is authorized.",
+        "Describe system preference accurately: it is not proof that all managed interpreters or Windows registry lookup are disabled."
+      ],
+      "source_findings": [],
+      "evidence_limits": [
+        "Read-only source and test audit; no build, vet, Go test, native Windows, network installation, quota agent, or Product execution performed in this audit. Historical passes keep their exact source/image/overlay and selector limits. Current reviews and CI are classified separately by root from current GitHub receipts; no blanket REVIEW_PENDING label is applied.",
+        "Policy unit tests assert argv; historical uv 0.13.8 A/B observation and interpreter-selection evidence remain specific to their original native environment/source."
+      ],
+      "review": {
+        "number": 646,
+        "head": "1df32782e7ade719e1d7f8c6153b4455a6ea740a",
+        "status": "CURRENT_HEAD_CODE_REVIEW_NO_FINDINGS",
+        "head_receipts": [
+          {
+            "sha_prefix": "1df32782e7",
+            "id": 6884234626,
+            "url": "https://github.com/applicate2628/mcp-local-hub/pull/646#issuecomment-6884234626",
+            "created_at": "2026-11-14T21:09:08Z"
+          }
+        ],
+        "head_summary": [
+          {
+            "id": 6884196156,
+            "url": "https://github.com/applicate2628/mcp-local-hub/pull/646#issuecomment-6884196156",
+            "updated_at": "2026-11-14T21:09:09Z",
+            "code_review": {
+              "commit_sha": "1df32782e7ade719e1d7f8c6153b4455a6ea740a",
+              "has_any_findings": false,
+              "has_unresolved_findings": false,
+              "status": "completed"
+            },
+            "security_review": {
+              "commit_sha": null,
+              "has_any_findings": null,
+              "has_unresolved_findings": null,
+              "status": null
+            }
+          }
+        ],
+        "historical_summary": [
+          {
+            "id": 6884196156,
+            "url": "https://github.com/applicate2628/mcp-local-hub/pull/646#issuecomment-6884196156",
+            "updated_at": "2026-11-14T21:09:09Z",
+            "code_review": {
+              "commit_sha": "1df32782e7ade719e1d7f8c6153b4455a6ea740a",
+              "has_any_findings": false,
+              "has_unresolved_findings": false,
+              "status": "completed"
+            },
+            "security_review": {
+              "commit_sha": null,
+              "has_any_findings": null,
+              "has_unresolved_findings": null,
+              "status": null
+            }
+          }
+        ],
+        "inline_head_count": 0,
+        "pagination_complete": true
+      },
+      "submitted_reviews": 1,
+      "inline_comments": 0,
+      "conversation_comments": 4,
+      "review_pages_complete": true,
+      "github_status_count": 0,
+      "github_check_run_count": 0,
+      "runtime_build_test_execution_in_this_audit": "NOT_RUN"
+    },
+    {
+      "number": 647,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/647",
+      "title": "fix(serena): own Windows Git subprocess environment",
+      "state": "open",
+      "draft": true,
+      "author": "applicate2628",
+      "assignees": [],
+      "requested_reviewers": [],
+      "source_audit_head": "dca92972e90c5280e6c217409acfc6fd0dfb38ea",
+      "documentary_successor_already_published": null,
+      "head_branch": "fix/serena-executable-discovery-20261114",
+      "base_branch": "master",
+      "api_reported_base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "resolved_current_base_sha": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "actual_merge_base": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "api_mergeability_at_read": {
+        "mergeable": null,
+        "state": "unknown",
+        "not_acceptance": true
+      },
+      "unique_change_disposition": "RETAIN_DRAFT_NO_WHOLE_PR_ABSORPTION_PROVED",
+      "changed_path_count_from_current_base_merge_base": 3,
+      "changed_path_blobs_equal_current_master": 0,
+      "technical_owner_paths": [
+        "internal/api/serena_build_environment.go",
+        "internal/api/serena_build_environment_executable_windows_test.go",
+        "internal/api/serena_build_environment_python_test.go"
+      ],
+      "contract_at_pr_head": "The Windows build environment issues exact executable-suffix and Git long-path controls as identity-bearing projection entries; PYTHONUNBUFFERED is runtime-only and must not change build identity.",
+      "mechanism_at_pr_head": "Sets PATHEXT=.EXE and one GIT_CONFIG_COUNT entry for core.longpaths=true in child environment. Each contributes its controlled provenance digest. Exact PYTHONUNBUFFERED is removed before build environment resolution/identity; unsupported Python variables still fail.",
+      "curation_ru": {
+        "owner": "internal/api/serena_build_environment: среда сборки Windows",
+        "contract": "PATHEXT и Git longpaths входят в выданную проекцию среды; PYTHONUNBUFFERED относится к запуску и не меняет идентичность сборки.",
+        "current": "Полезное изменение #639 уже включено, донор закрыт. Эта среда отличается от SERENA_HOME/USERPROFILE квалификационного host в #649.",
+        "next": "Сохранить точные ключи и идентичность проекции; квалифицировать действительные Git/uv/Python на выбранной новой сборке без повторного создания донора."
+      },
+      "remaining_work": [
+        "Preserve both fixed executable/Git controls and runtime-only PYTHONUNBUFFERED classification during #648 reconciliation.",
+        "Selected environment/identity roots suffice for unchanged local policy; current-pinned native UV/Git installation remains separate acceptance."
+      ],
+      "source_findings": [],
+      "evidence_limits": [
+        "Read-only source and test audit; no build, vet, Go test, native Windows, network installation, quota agent, or Product execution performed in this audit. Historical passes keep their exact source/image/overlay and selector limits. Current reviews and CI are classified separately by root from current GitHub receipts; no blanket REVIEW_PENDING label is applied.",
+        "R24 four roots per default/state profile plus build/vet on matching overlay. Native executable fixture proves bootstrap selection, not a real UV/Git install. No persistent Git configuration is modified by the production patch."
+      ],
+      "review": {
+        "number": 647,
+        "head": "dca92972e90c5280e6c217409acfc6fd0dfb38ea",
+        "status": "REVIEW_PENDING",
+        "head_receipts": [],
+        "head_summary": [],
+        "historical_summary": [
+          {
+            "id": 6884727013,
+            "url": "https://github.com/applicate2628/mcp-local-hub/pull/647#issuecomment-6884727013",
+            "updated_at": "2026-11-14T21:53:10Z",
+            "code_review": {
+              "commit_sha": "6de482cdd09034f71b5e091cc9e385e229cd96a2",
+              "has_any_findings": false,
+              "has_unresolved_findings": false,
+              "status": "completed"
+            },
+            "security_review": {
+              "commit_sha": null,
+              "has_any_findings": null,
+              "has_unresolved_findings": null,
+              "status": null
+            }
+          }
+        ],
+        "inline_head_count": 0,
+        "pagination_complete": true
+      },
+      "submitted_reviews": 1,
+      "inline_comments": 0,
+      "conversation_comments": 4,
+      "review_pages_complete": true,
+      "github_status_count": 0,
+      "github_check_run_count": 0,
+      "runtime_build_test_execution_in_this_audit": "NOT_RUN"
+    },
+    {
+      "number": 648,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/648",
+      "title": "fix(serena): own a compatible PyYAML build constraint",
+      "state": "open",
+      "draft": true,
+      "author": "applicate2628",
+      "assignees": [],
+      "requested_reviewers": [],
+      "source_audit_head": "184104c186108b150d1183318c3f6791f2a4ba5f",
+      "documentary_successor_already_published": null,
+      "head_branch": "fix/serena-build-compatibility-20261114",
+      "base_branch": "master",
+      "api_reported_base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "resolved_current_base_sha": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "actual_merge_base": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "api_mergeability_at_read": {
+        "mergeable": true,
+        "state": "clean",
+        "not_acceptance": true
+      },
+      "unique_change_disposition": "RETAIN_DRAFT_NO_WHOLE_PR_ABSORPTION_PROVED",
+      "changed_path_count_from_current_base_merge_base": 11,
+      "changed_path_blobs_equal_current_master": 0,
+      "technical_owner_paths": [
+        "internal/api/serena_prepared_build_constraint*.go",
+        "internal/api/serena_build_environment.go",
+        "internal/api/serena_owned_tree_windows.go",
+        "internal/api/serena_prepared_acquisition.go",
+        "internal/api/serena_prepared_execution.go",
+        "internal/api/serena_prepared_install_effects.go"
+      ],
+      "contract_at_pr_head": "A fixed setuptools<84 build constraint is part of the preparation identity and is held by its original private attempt-tree read pin until the actual UV native and IO obligations settle. Pre-entry failures cannot fabricate no-child evidence; uncertain pin close remains debt.",
+      "mechanism_at_pr_head": "Acquires/writes/flushes/verifies a single-link unnamed-stream constraint file; opens a read-only sharing pin that denies replacement/write, validates original tree/path/hash before use, appends the sole --build-constraint option only to tool install and requires exact receipt declaration. Incomplete contained settlement retains the pin; close failure invalidates completion.",
+      "curation_ru": {
+        "owner": "internal/api: исходный build-constraint и удерживаемый pin",
+        "contract": "setuptools<84 задаётся одним исходным проверенным файлом; pin остаётся жив до завершения native/IO-работ UV и сохраняет неизвестность закрытия.",
+        "current": "В Serena 2.1.0@5e4f5cd по-прежнему указан PyYAML 6.0.2, поэтому исправление не доказано устаревшим. #648 и #652 независимо добавляют разные четвёртые аргументы installPreparedSerena.",
+        "next": "Сохранить одновременно constraint pin и generation owner из #652, а также cleanup deadline из #643. Квалифицировать полное приобретение и установку на новом графе зависимостей; прежние pin-тесты не являются полным install PASS."
+      },
+      "remaining_work": [
+        "Resolve the shared installPreparedSerena fourth parameter with #652 by retaining both original constraint pin and original generation owner. Do not choose one diff over the other.",
+        "Preserve #643 cleanup deadline and owned-tree debt handling. Re-run targeted policy/receipt/native pin roots if this contract changes.",
+        "Requalify actual install with current Serena 2.1.0@5e4f5cd, selected Python/uv and new source-issued image. Current upstream mcp dependency changed to 2.2.0; old successful installation cannot be transferred."
+      ],
+      "source_findings": [
+        {
+          "id": "S648-S652-shared-parameter",
+          "category": "verified_integration_edge",
+          "severity": "integration",
+          "pin": "184104c186108b150d1183318c3f6791f2a4ba5f",
+          "file": "internal/api/serena_prepared_install_effects.go",
+          "lines": "37–80",
+          "condition": "#648 and #652 are reconciled into one source.",
+          "consequence": "Both independently occupy the fourth installPreparedSerena parameter with different original native owners. Omitting either discards a required custody obligation; reconciliation must pass both and retain their settlement rules.",
+          "related": "#652 b079e4c9503f080d8ab09742270c89a3bf88d7d5:internal/api/serena_prepared_install_effects.go:35–83"
+        }
+      ],
+      "evidence_limits": [
+        "Read-only source and test audit; no build, vet, Go test, native Windows, network installation, quota agent, or Product execution performed in this audit. Historical passes keep their exact source/image/overlay and selector limits. Current reviews and CI are classified separately by root from current GitHub receipts; no blanket REVIEW_PENDING label is applied.",
+        "Latest head adds native pin tests without production changes. Tests hold real Windows handles, use original no-child runner settlement and a protected-handle close failure; the fixture does not issue full acquire/begin namespace authority or successful child install.",
+        "Upstream exact pyproject.toml fetched read-only: commit 5e4f5cd173c7ff3eed37ee3f1de6c266b937c5dc, Git blob 7d7412a6a2c95d31b27b6df4a459f2141eb2bc6a, pyyaml==6.0.2, mcp==2.2.0, Python>=3.11,<3.15."
+      ],
+      "review": {
+        "number": 648,
+        "head": "184104c186108b150d1183318c3f6791f2a4ba5f",
+        "status": "REVIEW_PENDING",
+        "head_receipts": [],
+        "head_summary": [],
+        "historical_summary": [
+          {
+            "id": 6885167032,
+            "url": "https://github.com/applicate2628/mcp-local-hub/pull/648#issuecomment-6885167032",
+            "updated_at": "2026-11-14T22:28:57Z",
+            "code_review": {
+              "commit_sha": "fc4dc5c7145e4f4d709b91654ab4bc1fd7abe259",
+              "has_any_findings": false,
+              "has_unresolved_findings": false,
+              "status": "completed"
+            },
+            "security_review": {
+              "commit_sha": null,
+              "has_any_findings": null,
+              "has_unresolved_findings": null,
+              "status": null
+            }
+          }
+        ],
+        "inline_head_count": 0,
+        "pagination_complete": true
+      },
+      "submitted_reviews": 1,
+      "inline_comments": 0,
+      "conversation_comments": 6,
+      "review_pages_complete": true,
+      "github_status_count": 0,
+      "github_check_run_count": 0,
+      "runtime_build_test_execution_in_this_audit": "NOT_RUN"
+    },
+    {
+      "number": 649,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/649",
+      "title": "fix(serena): bind qualification home to the owned directory",
+      "state": "open",
+      "draft": true,
+      "author": "applicate2628",
+      "assignees": [],
+      "requested_reviewers": [],
+      "source_audit_head": "73caa97a860f1eaec205ec84c1502c47ce05cdc0",
+      "documentary_successor_already_published": null,
+      "head_branch": "fix/serena-qualification-home-20261114",
+      "base_branch": "master",
+      "api_reported_base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "resolved_current_base_sha": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "actual_merge_base": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "api_mergeability_at_read": {
+        "mergeable": null,
+        "state": "unknown",
+        "not_acceptance": true
+      },
+      "unique_change_disposition": "RETAIN_DRAFT_NO_WHOLE_PR_ABSORPTION_PROVED",
+      "changed_path_count_from_current_base_merge_base": 1,
+      "changed_path_blobs_equal_current_master": 0,
+      "technical_owner_paths": [
+        "internal/api/serena_qualification_resources.go"
+      ],
+      "contract_at_pr_head": "The unpublished qualification host derives its Python home from the already owned qualification root instead of an absent/unrelated profile directory.",
+      "mechanism_at_pr_head": "HostInputs adds USERPROFILE=root to its controlled host environment beside SERENA_HOME/TMP/TEMP. Existing root reservation release, source binding, endpoint start and resource-close proof gates remain active.",
+      "curation_ru": {
+        "owner": "internal/api/serena_qualification_resources: HostInputs",
+        "contract": "USERPROFILE квалификационного Python берётся из уже принадлежащего владельцу root, а не из отсутствующего или постороннего профиля.",
+        "current": "Малое изменение HostInputs не поглощено master и не дублирует #647. В самом PR нет нового адресного теста проекции.",
+        "next": "При следующем изменении выбрать или добавить содержательную проверку HostInputs; актуальная нативная квалификация должна подтвердить home/import поведение нового Serena и исходный lifecycle host."
+      },
+      "remaining_work": [
+        "Add or select a focused HostInputs projection regression when this owner is next changed; this PR itself adds no test.",
+        "Current-source native qualification must confirm Python import/home behavior with the newly pinned Serena package and its original host lifecycle."
+      ],
+      "source_findings": [],
+      "evidence_limits": [
+        "Read-only source and test audit; no build, vet, Go test, native Windows, network installation, quota agent, or Product execution performed in this audit. Historical passes keep their exact source/image/overlay and selector limits. Current reviews and CI are classified separately by root from current GitHub receipts; no blanket REVIEW_PENDING label is applied.",
+        "Historical combined qualification smoke is tied to its issued image and old package pin. No new test file is part of this PR."
+      ],
+      "review": {
+        "number": 649,
+        "head": "73caa97a860f1eaec205ec84c1502c47ce05cdc0",
+        "status": "CURRENT_HEAD_CODE_REVIEW_NO_FINDINGS",
+        "head_receipts": [
+          {
+            "sha_prefix": "73caa97a86",
+            "id": 6885230085,
+            "url": "https://github.com/applicate2628/mcp-local-hub/pull/649#issuecomment-6885230085",
+            "created_at": "2026-11-14T22:31:57Z"
+          }
+        ],
+        "head_summary": [
+          {
+            "id": 6885222070,
+            "url": "https://github.com/applicate2628/mcp-local-hub/pull/649#issuecomment-6885222070",
+            "updated_at": "2026-11-14T22:31:59Z",
+            "code_review": {
+              "commit_sha": "73caa97a860f1eaec205ec84c1502c47ce05cdc0",
+              "has_any_findings": false,
+              "has_unresolved_findings": false,
+              "status": "completed"
+            },
+            "security_review": {
+              "commit_sha": null,
+              "has_any_findings": null,
+              "has_unresolved_findings": null,
+              "status": null
+            }
+          }
+        ],
+        "historical_summary": [
+          {
+            "id": 6885222070,
+            "url": "https://github.com/applicate2628/mcp-local-hub/pull/649#issuecomment-6885222070",
+            "updated_at": "2026-11-14T22:31:59Z",
+            "code_review": {
+              "commit_sha": "73caa97a860f1eaec205ec84c1502c47ce05cdc0",
+              "has_any_findings": false,
+              "has_unresolved_findings": false,
+              "status": "completed"
+            },
+            "security_review": {
+              "commit_sha": null,
+              "has_any_findings": null,
+              "has_unresolved_findings": null,
+              "status": null
+            }
+          }
+        ],
+        "inline_head_count": 0,
+        "pagination_complete": true
+      },
+      "submitted_reviews": 1,
+      "inline_comments": 0,
+      "conversation_comments": 4,
+      "review_pages_complete": true,
+      "github_status_count": 0,
+      "github_check_run_count": 0,
+      "runtime_build_test_execution_in_this_audit": "NOT_RUN"
+    },
+    {
+      "number": 650,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/650",
+      "title": "fix(serena): preserve qualification bindings and request budgets",
+      "state": "open",
+      "draft": true,
+      "author": "applicate2628",
+      "assignees": [],
+      "requested_reviewers": [],
+      "source_audit_head": "2a273c10f6e5c0651e89860f88ef0b6a0e3748ef",
+      "documentary_successor_already_published": null,
+      "head_branch": "fix/serena-protocol-binding-20261114",
+      "base_branch": "master",
+      "api_reported_base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "resolved_current_base_sha": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "actual_merge_base": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "api_mergeability_at_read": {
+        "mergeable": null,
+        "state": "unknown",
+        "not_acceptance": true
+      },
+      "unique_change_disposition": "RETAIN_DRAFT_NO_WHOLE_PR_ABSORPTION_PROVED",
+      "changed_path_count_from_current_base_merge_base": 4,
+      "changed_path_blobs_equal_current_master": 0,
+      "technical_owner_paths": [
+        "internal/daemon/relay_qualification.go",
+        "internal/cli/serena_original_endpoint.go",
+        "internal/cli/serena_unpublished_qualification.go",
+        "internal/api/serena_prepared_qualification.go"
+      ],
+      "contract_at_pr_head": "Live qualification binds exact endpoint/start digests, each transport dial retains the original bounded request authority, and completed protocol receipt consumes terminal original connection/IO closure without reopening an endpoint already closed by the host.",
+      "mechanism_at_pr_head": "Separates static binding from live endpoint admission; fixes URL-versus-digest parameter. A private request context value retains owner and original context through net/http cancellation stripping; callback combines original cancellation/deadline with any earlier transport bound and joins validation before releasing activeDials. closeDone records the one underlying Close result; concurrent receivers wait for original Close and IO, with canceled/sticky-failed receipts still refused.",
+      "curation_ru": {
+        "owner": "daemon/relay_qualification → cli original endpoint → API qualification",
+        "contract": "Endpoint/start digests, исходный бюджет запроса и один исходный close соединения должны сохраняться до получения протокольной квитанции.",
+        "current": "В master producer передаёт URL потребителю, который требует EndpointSHA256: исправление необходимо. Изменение #656 уже включено; после закрытия host получение завершённой квитанции не должно заново требовать живого endpoint.",
+        "next": "Сохранить все три обязанности — digest, бюджет и исходный close — и проверить связку актуального выданного host/endpoint. Не создавать отдельный дублирующий PR для закрытого #656."
+      },
+      "remaining_work": [
+        "Preserve all three parts: digest correction, bounded transport request ownership and original close-result receiving.",
+        "Re-run the eleven exact relay roots in both profiles for any changed relay owner; use current issued host/endpoint integration to validate producer/consumer chain after source refresh.",
+        "Do not require post-closure liveness when receiving completed protocol; keep HTTPHost original endpoint closure as separate required evidence."
+      ],
+      "source_findings": [
+        {
+          "id": "S650-master-endpoint-identity",
+          "category": "verified_current_master_defect_fixed_by_pr",
+          "severity": "functional",
+          "pin": "75dbc6406123e22468f168b861d5e0622c9d5769",
+          "file": "internal/daemon/relay_qualification.go",
+          "lines": "118–137",
+          "condition": "A real serenaOriginalEndpoint is supplied to QualifyMCPObserved for a valid HTTP endpoint.",
+          "consequence": "Binding.validate passes the URL string to a receiver requiring EndpointSHA256, so original endpoint admission rejects before protocol qualification.",
+          "related": "internal/cli/serena_original_endpoint.go:114–127 compares e.endpointSHA to endpointSHA; PR changes call to b.EndpointSHA256."
+        }
+      ],
+      "evidence_limits": [
+        "Read-only source and test audit; no build, vet, Go test, native Windows, network installation, quota agent, or Product execution performed in this audit. Historical passes keep their exact source/image/overlay and selector limits. Current reviews and CI are classified separately by root from current GitHub receipts; no blanket REVIEW_PENDING label is applied.",
+        "R24 eleven roots per default/state mode (22 selected root executions) plus build/vet. Tests use real local sockets and deterministic held Close/IO but refusing endpoint probes; they do not fabricate a successful MCP/native child authority.",
+        "Full HTTP host/Serena installation and real supervisor lifecycle are not proved by relay unit roots."
+      ],
+      "review": {
+        "number": 650,
+        "head": "2a273c10f6e5c0651e89860f88ef0b6a0e3748ef",
+        "status": "REVIEW_PENDING",
+        "head_receipts": [],
+        "head_summary": [],
+        "historical_summary": [
+          {
+            "id": 6885529013,
+            "url": "https://github.com/applicate2628/mcp-local-hub/pull/650#issuecomment-6885529013",
+            "updated_at": "2026-11-15T11:48:45Z",
+            "code_review": {
+              "commit_sha": "686a54c0efbe9f99cb6ffa8d6480b289c6f465bf",
+              "has_any_findings": false,
+              "has_unresolved_findings": false,
+              "status": "completed"
+            },
+            "security_review": {
+              "commit_sha": null,
+              "has_any_findings": null,
+              "has_unresolved_findings": null,
+              "status": null
+            }
+          }
+        ],
+        "inline_head_count": 0,
+        "pagination_complete": true
+      },
+      "submitted_reviews": 1,
+      "inline_comments": 0,
+      "conversation_comments": 8,
+      "review_pages_complete": true,
+      "github_status_count": 0,
+      "github_check_run_count": 0,
+      "runtime_build_test_execution_in_this_audit": "NOT_RUN"
+    },
+    {
+      "number": 652,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/652",
+      "title": "fix(serena): read installed files through original tree",
+      "state": "open",
+      "draft": true,
+      "author": "applicate2628",
+      "assignees": [],
+      "requested_reviewers": [],
+      "source_audit_head": "b079e4c9503f080d8ab09742270c89a3bf88d7d5",
+      "documentary_successor_already_published": null,
+      "head_branch": "fix/serena-owned-file-reads-20261114",
+      "base_branch": "master",
+      "api_reported_base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "resolved_current_base_sha": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "actual_merge_base": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "api_mergeability_at_read": {
+        "mergeable": null,
+        "state": "unknown",
+        "not_acceptance": true
+      },
+      "unique_change_disposition": "RETAIN_DRAFT_NO_WHOLE_PR_ABSORPTION_PROVED",
+      "changed_path_count_from_current_base_merge_base": 10,
+      "changed_path_blobs_equal_current_master": 0,
+      "technical_owner_paths": [
+        "internal/api/serena_prepared_owned_file_windows.go",
+        "internal/api/serena_prepared_file_windows.go",
+        "internal/api/serena_prepared_install_effects.go",
+        "internal/api/serena_prepared_execution.go",
+        "internal/api/serena_prepared_acquisition.go",
+        "internal/api/serena_prepared_effects.go",
+        "internal/api/serena_prepared_qualification.go",
+        "internal/api/serena_prepared_runtime.go"
+      ],
+      "contract_at_pr_head": "Metadata and executables of the current generation must be read through that same retained native generation owner, preserving its DELETE-held authority and avoiding an incompatible path reopen. Independent/prior record reads retain the generic strict reader.",
+      "mechanism_at_pr_head": "Stores original generation pointer in PreparedSerenaInstallation and invocation; validates request key/root/deadline and native identity. Uses handle-relative generation reads for receipt, Python and exported entrypoints, bounded deduplicated metadata/export batches with original policy checks before/after and per-entry ownership. Rejects partial results and retains native close errors.",
+      "curation_ru": {
+        "owner": "internal/api: чтение через исходный generation owner",
+        "contract": "Receipt, Python и entrypoint текущего поколения читаются через тот же удерживаемый generation owner; независимые прежние записи используют отдельный строгий reader.",
+        "current": "Исправление не поглощено master. Его аргумент generation в installPreparedSerena конфликтует по смыслу с constraint pin из #648; эти полномочия нельзя взаимозаменять.",
+        "next": "Передать и сохранить оба исходных владельца вместе с deadline #643. Проверить наружную установочную связку и реальные read/close; не расширять sharing или допуск ради обхода удерживаемого исходного дерева."
+      },
+      "remaining_work": [
+        "Reconcile installPreparedSerena with #648 while keeping both original native owners, plus #643 cleanup deadline propagation.",
+        "Selected native sharing-conflict/retained-reader and bounded batch tests should be repeated only if their mechanism changes. Current issued generation/installation path needs independent native acceptance.",
+        "Retain generic independent reader for prior/finalized records; do not broadly relax ancestor sharing or owner checks."
+      ],
+      "source_findings": [
+        {
+          "id": "S648-S652-shared-parameter",
+          "category": "verified_integration_edge",
+          "severity": "integration",
+          "pin": "b079e4c9503f080d8ab09742270c89a3bf88d7d5",
+          "file": "internal/api/serena_prepared_install_effects.go",
+          "lines": "35–83",
+          "condition": "#652 and #648 are reconciled.",
+          "consequence": "Generation owner and constraint pin are independent required fourth-parameter additions; retain both native ownership contracts and their close rules."
+        }
+      ],
+      "evidence_limits": [
+        "Read-only source and test audit; no build, vet, Go test, native Windows, network installation, quota agent, or Product execution performed in this audit. Historical passes keep their exact source/image/overlay and selector limits. Current reviews and CI are classified separately by root from current GitHub receipts; no blanket REVIEW_PENDING label is applied.",
+        "Real Windows native test demonstrates generic reopen failure while an original DELETE-capable root is retained and success via the retained handle; batch tests include bounds/cancel/outside/ADS/close primitives. They do not issue positive acquisition namespace or native child authority."
+      ],
+      "review": {
+        "number": 652,
+        "head": "b079e4c9503f080d8ab09742270c89a3bf88d7d5",
+        "status": "CURRENT_HEAD_CODE_REVIEW_NO_FINDINGS",
+        "head_receipts": [
+          {
+            "sha_prefix": "b079e4c950",
+            "id": 6886037388,
+            "url": "https://github.com/applicate2628/mcp-local-hub/pull/652#issuecomment-6886037388",
+            "created_at": "2026-11-14T23:40:59Z"
+          }
+        ],
+        "head_summary": [
+          {
+            "id": 6885705748,
+            "url": "https://github.com/applicate2628/mcp-local-hub/pull/652#issuecomment-6885705748",
+            "updated_at": "2026-11-14T23:41:01Z",
+            "code_review": {
+              "commit_sha": "b079e4c9503f080d8ab09742270c89a3bf88d7d5",
+              "has_any_findings": false,
+              "has_unresolved_findings": false,
+              "status": "completed"
+            },
+            "security_review": {
+              "commit_sha": null,
+              "has_any_findings": null,
+              "has_unresolved_findings": null,
+              "status": null
+            }
+          }
+        ],
+        "historical_summary": [
+          {
+            "id": 6885705748,
+            "url": "https://github.com/applicate2628/mcp-local-hub/pull/652#issuecomment-6885705748",
+            "updated_at": "2026-11-14T23:41:01Z",
+            "code_review": {
+              "commit_sha": "b079e4c9503f080d8ab09742270c89a3bf88d7d5",
+              "has_any_findings": false,
+              "has_unresolved_findings": false,
+              "status": "completed"
+            },
+            "security_review": {
+              "commit_sha": null,
+              "has_any_findings": null,
+              "has_unresolved_findings": null,
+              "status": null
+            }
+          }
+        ],
+        "inline_head_count": 0,
+        "pagination_complete": true
+      },
+      "submitted_reviews": 1,
+      "inline_comments": 0,
+      "conversation_comments": 9,
+      "review_pages_complete": true,
+      "github_status_count": 0,
+      "github_check_run_count": 0,
+      "runtime_build_test_execution_in_this_audit": "NOT_RUN"
+    },
+    {
+      "number": 653,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/653",
+      "title": "fix(serena): validate TCP query budgets, Windows headers and IPv6 zones",
+      "state": "open",
+      "draft": true,
+      "author": "applicate2628",
+      "assignees": [],
+      "requested_reviewers": [],
+      "source_audit_head": "90fd6f69ea4a59856375e29b34cebf4953cb2ff4",
+      "documentary_successor_already_published": null,
+      "head_branch": "fix/serena-tcp-query-budget-20261115",
+      "base_branch": "master",
+      "api_reported_base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "resolved_current_base_sha": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "actual_merge_base": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "api_mergeability_at_read": {
+        "mergeable": null,
+        "state": "unknown",
+        "not_acceptance": true
+      },
+      "unique_change_disposition": "RETAIN_DRAFT_NO_WHOLE_PR_ABSORPTION_PROVED",
+      "changed_path_count_from_current_base_merge_base": 4,
+      "changed_path_blobs_equal_current_master": 0,
+      "technical_owner_paths": [
+        "internal/api/serena_tcp_rows_observed.go",
+        "internal/api/serena_tcp_rows_observed_windows.go",
+        "internal/cli/serena_original_endpoint.go"
+      ],
+      "contract_at_pr_head": "Observed TCP rows remain bounded to original native process/IO and request deadline. Parser accepts supported exact English/Russian headers and numeric scoped IPv6; wildcard listeners cannot grant positive original endpoint ownership.",
+      "mechanism_at_pr_head": "Rounds remaining cleanup duration down to whole milliseconds without extending the original end and refuses <=0. Parses exact English and captured Russian OEM866 headers, rejects mixed/duplicate/unknown shapes, validates complete numeric IPv6 scopes without interface lookup, retains IPv4/IPv6 distinctions and normalizes scoped unspecified IPv6 into wildcard refusal.",
+      "curation_ru": {
+        "owner": "internal/api/serena_tcp_rows_observed + cli original endpoint",
+        "contract": "Наблюдение TCP связано с исходным процессом, вводом/выводом и сроком запроса; точные поддержанные заголовки и IPv6 zones не дают wildcard-листенеру права владения endpoint.",
+        "current": "Поправка парсера/миллисекундного бюджета не поглощена. В новом master изменён contained runner, поэтому прежний parser PASS не является новой нативной квалификацией этого исполнителя.",
+        "next": "На разрешённой нативной фикстуре проверить текущий runner и собственный listener; сохранить отдельно неизвестный исход первоначальной stage06, а не объяснять его поздней удачной серией."
+      },
+      "remaining_work": [
+        "Keep actual native scanner+owned listener test on current process runner and selected Windows locale. Parser fixture coverage and original native settlement are separate obligations.",
+        "Consider a deterministic boundary case for sub-millisecond cleanup refusal only when that budget logic is changed; do not infer such a test from current suites.",
+        "Preserve original stage06 failure and NOT_ESTABLISHED settlement; later success does not identify the missing original failure frame."
+      ],
+      "source_findings": [],
+      "evidence_limits": [
+        "Read-only source and test audit; no build, vet, Go test, native Windows, network installation, quota agent, or Product execution performed in this audit. Historical passes keep their exact source/image/overlay and selector limits. Current reviews and CI are classified separately by root from current GitHub receipts; no blanket REVIEW_PENDING label is applied.",
+        "Historical parser 85-leaf results and native owned-listener observation are source-bound. The real listener test does not guarantee a native scoped IPv6 row. Russian header fixture is captured data, not every Windows locale.",
+        "No deterministic sub-millisecond boundary or native close-failure matrix was found in the authored tests."
+      ],
+      "review": {
+        "number": 653,
+        "head": "90fd6f69ea4a59856375e29b34cebf4953cb2ff4",
+        "status": "CURRENT_HEAD_CODE_REVIEW_NO_FINDINGS",
+        "head_receipts": [
+          {
+            "sha_prefix": "90fd6f69ea",
+            "id": 6895799451,
+            "url": "https://github.com/applicate2628/mcp-local-hub/pull/653#issuecomment-6895799451",
+            "created_at": "2026-11-15T14:14:19Z"
+          }
+        ],
+        "head_summary": [
+          {
+            "id": 6893435138,
+            "url": "https://github.com/applicate2628/mcp-local-hub/pull/653#issuecomment-6893435138",
+            "updated_at": "2026-11-15T14:14:21Z",
+            "code_review": {
+              "commit_sha": "90fd6f69ea4a59856375e29b34cebf4953cb2ff4",
+              "has_any_findings": false,
+              "has_unresolved_findings": false,
+              "status": "completed"
+            },
+            "security_review": {
+              "commit_sha": null,
+              "has_any_findings": null,
+              "has_unresolved_findings": null,
+              "status": null
+            }
+          }
+        ],
+        "historical_summary": [
+          {
+            "id": 6893435138,
+            "url": "https://github.com/applicate2628/mcp-local-hub/pull/653#issuecomment-6893435138",
+            "updated_at": "2026-11-15T14:14:21Z",
+            "code_review": {
+              "commit_sha": "90fd6f69ea4a59856375e29b34cebf4953cb2ff4",
+              "has_any_findings": false,
+              "has_unresolved_findings": false,
+              "status": "completed"
+            },
+            "security_review": {
+              "commit_sha": null,
+              "has_any_findings": null,
+              "has_unresolved_findings": null,
+              "status": null
+            }
+          }
+        ],
+        "inline_head_count": 0,
+        "pagination_complete": true
+      },
+      "submitted_reviews": 1,
+      "inline_comments": 0,
+      "conversation_comments": 12,
+      "review_pages_complete": true,
+      "github_status_count": 0,
+      "github_check_run_count": 0,
+      "runtime_build_test_execution_in_this_audit": "NOT_RUN"
+    },
+    {
+      "number": 654,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/654",
+      "title": "fix(serena): receive Ready readback with its original byte bound",
+      "state": "open",
+      "draft": true,
+      "author": "applicate2628",
+      "assignees": [],
+      "requested_reviewers": [],
+      "source_audit_head": "d01fb6e73013d6a47628b1a9cbecd2d5f3b8e32c",
+      "documentary_successor_already_published": null,
+      "head_branch": "fix/serena-ready-readback-20261115",
+      "base_branch": "master",
+      "api_reported_base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "resolved_current_base_sha": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "actual_merge_base": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "api_mergeability_at_read": {
+        "mergeable": null,
+        "state": "unknown",
+        "not_acceptance": true
+      },
+      "unique_change_disposition": "RETAIN_DRAFT_NO_WHOLE_PR_ABSORPTION_PROVED",
+      "changed_path_count_from_current_base_merge_base": 2,
+      "changed_path_blobs_equal_current_master": 0,
+      "technical_owner_paths": [
+        "internal/api/serena_prepared_publication.go",
+        "internal/api/state_file_io_observed_windows.go",
+        "internal/api/state_read_observation.go",
+        "internal/api/serena_prepared_record_io.go"
+      ],
+      "contract_at_pr_head": "Ready receiving must validate the original writer readback with its original exact byte cap while separately enforcing a nonempty record of at most 1 MiB.",
+      "mechanism_at_pr_head": "Changes readyWritten reader.Validate bound from 1048576 to int64(len(raw)), with independent 0<len(raw)<=1<<20 gate. This does not widen reader authority or replace original writer/readback evidence.",
+      "curation_ru": {
+        "owner": "internal/api/serena_prepared_publication: приём Ready readback",
+        "contract": "Приёмник проверяет исходное чтение с первоначальным точным пределом len(raw), отдельно требуя ненулевую запись не более 1 МиБ.",
+        "current": "В master до сих пор передаётся 1 МиБ вместо исходного len(contents), а reader требует точного равенства. PR устраняет это реальное несогласование без расширения полномочий чтения.",
+        "next": "Квалифицировать полный путь Ready на новом выданном источнике совместно с исходными writer/namespace/finalizer; достижение следующего guard в адресном тесте не объявлять завершённой публикацией."
+      },
+      "remaining_work": [
+        "After any reconciliation, select both native original-readback/refusal roots. Keep the successful next-guard oracle (PREREQUISITES_MISSING) distinct from completed Ready publication.",
+        "End-to-end Ready acceptance must use current issued installation/qualification and finalization ownership; historical smoke on older pin cannot transfer."
+      ],
+      "source_findings": [
+        {
+          "id": "S654-master-readback-bound",
+          "category": "verified_current_master_defect_fixed_by_pr",
+          "severity": "functional",
+          "pin": "75dbc6406123e22468f168b861d5e0622c9d5769",
+          "file": "internal/api/serena_prepared_publication.go",
+          "lines": "86–88",
+          "condition": "An otherwise complete Ready writer has a record whose actual length is not exactly 1 MiB.",
+          "consequence": "readyWritten validates original reader with 1 MiB but writer issued readback with len(contents); exact original-cap equality fails and publication is refused.",
+          "related": "internal/api/state_file_io_observed_windows.go:65,74; internal/api/state_read_observation.go:294–317."
+        }
+      ],
+      "evidence_limits": [
+        "Read-only source and test audit; no build, vet, Go test, native Windows, network installation, quota agent, or Product execution performed in this audit. Historical passes keep their exact source/image/overlay and selector limits. Current reviews and CI are classified separately by root from current GitHub receipts; no blanket REVIEW_PENDING label is applied.",
+        "Native fixtures use real writer, lease, namespace and readback. 1700-byte and exact-1-MiB samples reach the next missing-prerequisites guard; over-limit/foreign path/budget/data/renewed deadline cases refuse. No installation or complete publication evidence is manufactured."
+      ],
+      "review": {
+        "number": 654,
+        "head": "d01fb6e73013d6a47628b1a9cbecd2d5f3b8e32c",
+        "status": "CURRENT_HEAD_CODE_REVIEW_NO_FINDINGS",
+        "head_receipts": [
+          {
+            "sha_prefix": "d01fb6e730",
+            "id": 6894195263,
+            "url": "https://github.com/applicate2628/mcp-local-hub/pull/654#issuecomment-6894195263",
+            "created_at": "2026-11-15T12:18:10Z"
+          }
+        ],
+        "head_summary": [
+          {
+            "id": 6894185908,
+            "url": "https://github.com/applicate2628/mcp-local-hub/pull/654#issuecomment-6894185908",
+            "updated_at": "2026-11-15T12:18:11Z",
+            "code_review": {
+              "commit_sha": "d01fb6e73013d6a47628b1a9cbecd2d5f3b8e32c",
+              "has_any_findings": false,
+              "has_unresolved_findings": false,
+              "status": "completed"
+            },
+            "security_review": {
+              "commit_sha": null,
+              "has_any_findings": null,
+              "has_unresolved_findings": null,
+              "status": null
+            }
+          }
+        ],
+        "historical_summary": [
+          {
+            "id": 6894185908,
+            "url": "https://github.com/applicate2628/mcp-local-hub/pull/654#issuecomment-6894185908",
+            "updated_at": "2026-11-15T12:18:11Z",
+            "code_review": {
+              "commit_sha": "d01fb6e73013d6a47628b1a9cbecd2d5f3b8e32c",
+              "has_any_findings": false,
+              "has_unresolved_findings": false,
+              "status": "completed"
+            },
+            "security_review": {
+              "commit_sha": null,
+              "has_any_findings": null,
+              "has_unresolved_findings": null,
+              "status": null
+            }
+          }
+        ],
+        "inline_head_count": 0,
+        "pagination_complete": true
+      },
+      "submitted_reviews": 1,
+      "inline_comments": 0,
+      "conversation_comments": 4,
+      "review_pages_complete": true,
+      "github_status_count": 0,
+      "github_check_run_count": 0,
+      "runtime_build_test_execution_in_this_audit": "NOT_RUN"
+    },
+    {
+      "number": 655,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/655",
+      "title": "fix(serena): settle preparation before canceling work context",
+      "state": "open",
+      "draft": true,
+      "author": "applicate2628",
+      "assignees": [],
+      "requested_reviewers": [],
+      "source_audit_head": "2defe618259f7db4144824d19927b032300d160d",
+      "documentary_successor_already_published": null,
+      "head_branch": "fix/serena-finalize-context-20261115",
+      "base_branch": "master",
+      "api_reported_base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "resolved_current_base_sha": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "actual_merge_base": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "api_mergeability_at_read": {
+        "mergeable": null,
+        "state": "unknown",
+        "not_acceptance": true
+      },
+      "unique_change_disposition": "RETAIN_DRAFT_NO_WHOLE_PR_ABSORPTION_PROVED",
+      "changed_path_count_from_current_base_merge_base": 2,
+      "changed_path_blobs_equal_current_master": 0,
+      "technical_owner_paths": [
+        "internal/api/serena_prepared_runtime.go",
+        "internal/api/serena_preparation_close.go",
+        "internal/api/state_file_io_observed.go"
+      ],
+      "contract_at_pr_head": "The original work context remains live until deferred original writer/namespace finalization receives completion, while real parent cancellation and original deadline still prohibit successful completion.",
+      "mechanism_at_pr_head": "Registers work-cancel closure before the finalizer, assigns it only after deriving the work context, so return order is finalizer→work cancellation→cleanup cancellation. Early invalid/nil/canceled requests still receive bounded cleanup.",
+      "curation_ru": {
+        "owner": "internal/api/serena_prepared_runtime: порядок завершения",
+        "contract": "Исходный рабочий контекст остаётся действительным до получения finalizer результатов writer/namespace; настоящая отмена родителя и исходный deadline продолжают запрещать успех.",
+        "current": "В master defer cancel исполняется перед ранее зарегистрированным finalizer. PR меняет порядок завершения; пересечение runtime-файла с #652 не делает эти ответственности одинаковыми.",
+        "next": "Сохранить порядок finalizer → work cancel → cleanup cancel при согласовании reader. Проверить полный Ready/settlement на актуальном образе; контролируемая остановка до установки не является install PASS."
+      },
+      "remaining_work": [
+        "Keep this finalizer ordering while reconciling current-generation reader changes.",
+        "Select original writer-context and early-exit native roots if preparation control flow changes; preserve parent-canceled refusal and original deadline equality.",
+        "Current complete Ready publication remains a separate integration gate, not a conclusion from controlled-stop fixtures."
+      ],
+      "source_findings": [
+        {
+          "id": "S655-master-premature-cancel",
+          "category": "verified_current_master_defect_fixed_by_pr",
+          "severity": "functional",
+          "pin": "75dbc6406123e22468f168b861d5e0622c9d5769",
+          "file": "internal/api/serena_prepared_runtime.go",
+          "lines": "317–359",
+          "condition": "Prepare has an original outcome writer whose completion requires namespaces closed by FinishPreparation.",
+          "consequence": "Later-registered defer cancel runs before the earlier finalizer. The writer first receives completion with canceled original request context, so finalization reports OUTCOME_FINAL_CLOSE_PENDING rather than a valid final receipt.",
+          "related": "internal/api/state_file_io_observed.go:205–223; internal/api/serena_preparation_close.go:50–145."
+        }
+      ],
+      "evidence_limits": [
+        "Read-only source and test audit; no build, vet, Go test, native Windows, network installation, quota agent, or Product execution performed in this audit. Historical passes keep their exact source/image/overlay and selector limits. Current reviews and CI are classified separately by root from current GitHub receipts; no blanket REVIEW_PENDING label is applied.",
+        "Tests deliberately stop before acquisition/installation, issue actual state-file writer and namespaces, and run concrete FinishPreparation. They verify contexts/closed handles and canceled-parent refusal but supply no child/MCP/Ready authority."
+      ],
+      "review": {
+        "number": 655,
+        "head": "2defe618259f7db4144824d19927b032300d160d",
+        "status": "CURRENT_HEAD_CODE_REVIEW_NO_FINDINGS",
+        "head_receipts": [
+          {
+            "sha_prefix": "2defe61825",
+            "id": 6894346543,
+            "url": "https://github.com/applicate2628/mcp-local-hub/pull/655#issuecomment-6894346543",
+            "created_at": "2026-11-15T12:30:54Z"
+          }
+        ],
+        "head_summary": [
+          {
+            "id": 6894334910,
+            "url": "https://github.com/applicate2628/mcp-local-hub/pull/655#issuecomment-6894334910",
+            "updated_at": "2026-11-15T12:30:56Z",
+            "code_review": {
+              "commit_sha": "2defe618259f7db4144824d19927b032300d160d",
+              "has_any_findings": false,
+              "has_unresolved_findings": false,
+              "status": "completed"
+            },
+            "security_review": {
+              "commit_sha": null,
+              "has_any_findings": null,
+              "has_unresolved_findings": null,
+              "status": null
+            }
+          }
+        ],
+        "historical_summary": [
+          {
+            "id": 6894334910,
+            "url": "https://github.com/applicate2628/mcp-local-hub/pull/655#issuecomment-6894334910",
+            "updated_at": "2026-11-15T12:30:56Z",
+            "code_review": {
+              "commit_sha": "2defe618259f7db4144824d19927b032300d160d",
+              "has_any_findings": false,
+              "has_unresolved_findings": false,
+              "status": "completed"
+            },
+            "security_review": {
+              "commit_sha": null,
+              "has_any_findings": null,
+              "has_unresolved_findings": null,
+              "status": null
+            }
+          }
+        ],
+        "inline_head_count": 0,
+        "pagination_complete": true
+      },
+      "submitted_reviews": 1,
+      "inline_comments": 0,
+      "conversation_comments": 5,
+      "review_pages_complete": true,
+      "github_status_count": 0,
+      "github_check_run_count": 0,
+      "runtime_build_test_execution_in_this_audit": "NOT_RUN"
+    },
+    {
+      "number": 657,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/657",
+      "title": "test(windows): issue a native canonical command Product fixture for RunV5",
+      "state": "open",
+      "draft": true,
+      "author": "applicate2628",
+      "assignees": [],
+      "requested_reviewers": [],
+      "source_audit_head": "4fa52b60b719664ede441be339e196a8b9766c50",
+      "documentary_successor_already_published": null,
+      "head_branch": "fix/canonical-command-test-product-20261116",
+      "base_branch": "master",
+      "api_reported_base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "resolved_current_base_sha": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "actual_merge_base": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "api_mergeability_at_read": {
+        "mergeable": null,
+        "state": "unknown",
+        "not_acceptance": true
+      },
+      "unique_change_disposition": "RETAIN_DRAFT_NO_WHOLE_PR_ABSORPTION_PROVED",
+      "changed_path_count_from_current_base_merge_base": 2,
+      "changed_path_blobs_equal_current_master": 0,
+      "technical_owner_paths": [
+        "build.ps1",
+        "scripts/test-windows-product-build.ps1",
+        "internal/cli/upgrade_gui_qualified_fixture_windows_test.go",
+        "internal/cli/upgrade_gui_windows_test.go",
+        "internal/cli/canonicalize_product_windows.go",
+        "internal/binaryadmission/windows_product_registry_compiled.go"
+      ],
+      "contract_at_pr_head": "A dedicated test-state Product compiles internal/cli tests with canonical entry identity, issues a fixture only after its complete actual launcher/Product/identity set passes admission, and remains excluded from release/publisher modes.",
+      "mechanism_at_pr_head": "New CanonicalEntryCommandTestProduct requires TestStateIsolatedProduct and a .scratch output. It builds launcher first, compiles internal/cli using go test -c, carries build identity/GUI resource metadata, checks exact output set, then emits source/version/build/reverse projection and three file hashes. The existing strict native fixture requires executing image/native identity and a real V1 entry set.",
+      "curation_ru": {
+        "owner": "build.ps1 + scripts/test-windows-product-build.ps1: Product-фикстура",
+        "contract": "Отдельный test-state Product выпускается только после допуска действительного набора launcher/Product/identity и не подменяет релизный или Serena qualification образ.",
+        "current": "В master изменён build.ps1: важен registry-relative ordinal inventory. Обычный build пока выпускает schema 3/identity-v1; наличие V2/V4 кода не включает его без compiled registry. Прежняя фикстура 0.4.60 не квалифицирует 0.4.65.",
+        "next": "Сохранить новое сравнение относительного набора executable, выпустить актуальную V1-фикстуру и проверить журнал/backend-hold/abort consumers. V2 payload требует отдельного решения о реально включённом producer и его фикстуре."
+      },
+      "remaining_work": [
+        "Preserve master build.ps1:599–604 registry-relative ordinal executable inventory when inserting the new fixture emitter; avoid restoring the old absolute-path comparison.",
+        "Build a fresh current-source/current-version Product fixture and exercise current V1 unreadable-intent abort, journal allowance and backend-hold paths when native execution is authorized.",
+        "Do not label this a V2 runtime-payload fixture. Default registry is still schema 3/identity-v1 and normal builder supplies no compiledWindowsProductRegistryBase64; V2 requires a separate producer/consumer fixture decision if enabled.",
+        "Retain exact old native receipt and its limited corrupt-intent/prior-preservation oracle; broad mandatory failures remain until separately qualified."
+      ],
+      "source_findings": [
+        {
+          "id": "S657-master-builder-drift",
+          "category": "verified_integration_edge",
+          "severity": "integration",
+          "pin": "75dbc6406123e22468f168b861d5e0622c9d5769",
+          "file": "build.ps1",
+          "lines": "599–604",
+          "condition": "#657 old-base builder patch is reconciled with master.",
+          "consequence": "Current registry-relative ordinal executable inventory is a newer fix and must survive fixture insertion. Head native evidence at version 0.4.60 cannot establish current version 0.4.65.",
+          "related": "Current selector internal/cli/canonicalize_product_windows.go:186–192; compiled registry input defaults absent in internal/binaryadmission/windows_product_registry_compiled.go:10–25."
+        }
+      ],
+      "evidence_limits": [
+        "Read-only source and test audit; no build, vet, Go test, native Windows, network installation, quota agent, or Product execution performed in this audit. Historical passes keep their exact source/image/overlay and selector limits. Current reviews and CI are classified separately by root from current GitHub receipts; no blanket REVIEW_PENDING label is applied.",
+        "Historical exact head 4fa52b native version 0.4.60 fixture and TestRunV5UpgradeWindows_UnreadableIntentAbortsUpgrade PASS prove abort/prior preservation on that image. New master version 0.4.65 and RunV5 owner/journal/backend mechanisms are outside that receipt.",
+        "PowerShell authored tests use fake compiler/validator programs for plan, command topology, hashes and extra-executable refusal. They are not native Product execution. Existing Go fixture stubs scheduler/successor behavior; it does not prove successful full upgrade."
+      ],
+      "review": {
+        "number": 657,
+        "head": "4fa52b60b719664ede441be339e196a8b9766c50",
+        "status": "REVIEW_PENDING",
+        "head_receipts": [],
+        "head_summary": [],
+        "historical_summary": [],
+        "inline_head_count": 0,
+        "pagination_complete": true
+      },
+      "submitted_reviews": 1,
+      "inline_comments": 0,
+      "conversation_comments": 1,
+      "review_pages_complete": true,
+      "github_status_count": 0,
+      "github_check_run_count": 0,
+      "runtime_build_test_execution_in_this_audit": "NOT_RUN"
+    },
+    {
+      "number": 658,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/658",
+      "title": "chore: canonical AGENTS.md, PR quality plan and Go test diagnostics",
+      "state": "open",
+      "draft": true,
+      "author": "applicate2628",
+      "assignees": [],
+      "requested_reviewers": [],
+      "source_audit_head": "9b792480d99f5723a5a9f11d27359c91a425ef26",
+      "documentary_successor_already_published": null,
+      "head_branch": "docs/agents-canonical-plan-20261117",
+      "base_branch": "master",
+      "api_reported_base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "resolved_current_base_sha": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "actual_merge_base": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "api_mergeability_at_read": {
+        "mergeable": true,
+        "state": "clean",
+        "not_acceptance": true
+      },
+      "unique_change_disposition": "RETAIN_DRAFT_NO_WHOLE_PR_ABSORPTION_PROVED",
+      "changed_path_count_from_current_base_merge_base": 27,
+      "changed_path_blobs_equal_current_master": 0,
+      "technical_owner_paths": [
+        "AGENTS.md",
+        "docs/agent-runbook.md",
+        ".plans/2026-11/open-pr-integration-20261117.md",
+        "internal/api/hub_mcp_state_read_inode_windows.go",
+        "internal/api/lsp_routing/main_test.go",
+        "internal/api/serena_routing/main_test.go",
+        "internal/daemon/main_test.go",
+        "internal/oneapirun/main_test.go",
+        "tools/testshards/main.go"
+      ],
+      "contract_at_pr_head": "Canonical instructions and one plan; accurate effective-policy diagnostic without relaxing DACL; test-process state isolation and optional coverage diagnostic, never a replacement full gate.",
+      "mechanism_at_pr_head": "Four TestMain additions harden isolated roots, reset cache and report cleanup. Current master adds separate mcproute TestMain. testshards executes TestMain even in list mode and explicitly declares shards not equivalent to one process.",
+      "curation_ru": {
+        "owner": "Канонический план, инструкции и изоляция Go-тестов",
+        "contract": "Один текущий план и точная диагностика без ослабления прав; каждый пакетный тестовый процесс получает собственные ограниченные входы и проверяемое завершение.",
+        "current": "Master уже 75dbc640 после #662. В master 8 объявлений TestMain, один Linux-only; #658 добавляет четыре к своей старой базе. Новый helper TestOwnedIsolatedStdioFixture не распознаётся его ранним daemon-dispatch и при совместном исполнении оставляет выделенный root.",
+        "next": "Сначала исправить точное распознавание нового helper и обновить карту пакетных тестов. Одним архитектурным владельцем адресно согласовать 96 устаревших baseline-записей, mcproute/binaryadmission правила и новые workers; полные обязательные проверки остаются отдельным критерием."
+      },
+      "remaining_work": [
+        "Fix precise early helper dispatch for #662 native isolated fixture before allocating daemon TestMain state root.",
+        "Update owner map/master head and inventory: master 8 declarations, #658 base+additions 11, combined expected 12.",
+        "One code owner for #628/#659 shared by plan lanes.",
+        "Retain full default/tagged source-bound gate failures and unknowns.",
+        "Separate last documentation-only commit from whole 27-file PR scope.",
+        "Single architecture owner reconciles relocated fingerprints and missing mcproute/binaryadmission debt-owner/import policy; do not blanket rebaseline or infer runtime ownership from registry."
+      ],
+      "source_findings": [
+        {
+          "id": "C1",
+          "classification": "source_confirmed_integration_defect",
+          "severity": "P2",
+          "paths": [
+            "internal/daemon/main_test.go:37-74@9b792480",
+            "internal/daemon/isolated_stdio_windows_test.go:24-130@75dbc640"
+          ],
+          "condition": "Combine #658 TestMain with #662 and execute TestOwnedIsolatedStdioFixture child.",
+          "consequence": "Unrecognized helper allocates package state root, then os.Exit bypasses cleanup; root is left behind."
+        },
+        {
+          "id": "C4",
+          "classification": "stale_current_status",
+          "paths": [
+            ".plans/2026-11/open-pr-integration-20261117.md:3",
+            "PR658 body"
+          ],
+          "consequence": "Claims master unchanged/no merge predate #662."
+        },
+        {
+          "id": "C5",
+          "classification": "planning_dependency_error",
+          "paths": [
+            ".plans/2026-11/open-pr-integration-20261117.md:71-76"
+          ],
+          "consequence": "Five lanes share #628/#659 and are not independently mutable owners."
+        },
+        {
+          "id": "C7",
+          "classification": "static_architecture_registry_drift",
+          "paths": [
+            "architecture/baseline.yaml",
+            "architecture/owners.yaml",
+            "architecture/workers.yaml",
+            "architecture/policy.yaml"
+          ],
+          "consequence": "96 accepted-debt entries reference deleted gui paths; path-sensitive identities now stale, new packages lack assignment rules. Actual archcheck execution not performed."
+        }
+      ],
+      "evidence_limits": [
+        "No TestMain, compiled inventory or tests executed.",
+        "Static inventory counts declarations; Linux-only pinstatus is separate.",
+        "testshards does not prove whole-tree deadline/settlement."
+      ],
+      "review": {
+        "number": 658,
+        "head": "9b792480d99f5723a5a9f11d27359c91a425ef26",
+        "status": "REVIEW_PENDING",
+        "head_receipts": [],
+        "head_summary": [],
+        "historical_summary": [],
+        "inline_head_count": 0,
+        "pagination_complete": true
+      },
+      "submitted_reviews": 7,
+      "inline_comments": 0,
+      "conversation_comments": 19,
+      "review_pages_complete": true,
+      "github_status_count": 0,
+      "github_check_run_count": 0,
+      "runtime_build_test_execution_in_this_audit": "NOT_RUN"
+    },
+    {
+      "number": 659,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/659",
+      "title": "fix(api): preserve unknown port observations in stop decisions",
+      "state": "open",
+      "draft": true,
+      "author": "applicate2628",
+      "assignees": [],
+      "requested_reviewers": [],
+      "source_audit_head": "a3568dfe3426afaca4176d57a2310097e5214e77",
+      "documentary_successor_already_published": null,
+      "head_branch": "fix/api-port-pid-observation-20261118",
+      "base_branch": "master",
+      "api_reported_base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "resolved_current_base_sha": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "actual_merge_base": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "api_mergeability_at_read": {
+        "mergeable": null,
+        "state": "unknown",
+        "not_acceptance": true
+      },
+      "unique_change_disposition": "RETAIN_DRAFT_NO_WHOLE_PR_ABSORPTION_PROVED",
+      "changed_path_count_from_current_base_merge_base": 23,
+      "changed_path_blobs_equal_current_master": 0,
+      "technical_owner_paths": [
+        "internal/api/processes.go",
+        "internal/api/install.go",
+        "internal/api/stop_force_supervisor.go",
+        "internal/api/status_enrich.go"
+      ],
+      "contract_at_pr_head": "Control consumers receive a tri-state loopback-port observation: listener PID, confirmed absence, or query failure. A failed or partial collector result cannot be interpreted as no listener, ownership, completed port release, or permission to downgrade/removal. Diagnostic optional memory collection remains a separate route.",
+      "mechanism_at_pr_head": "queryLoopbackPortPID uses the existing bounded netstat collector and exactly parses an IPv4 127.0.0.1 listener. Initial failure prevents identity lookup/kill; a post-kill failure preserves the performed-kill fact but leaves port release unknown. The real Serena intent-removal path now preserves intent on unknown observation. Existing PID/image/current-user checks and numeric taskkill remain unchanged.",
+      "curation_ru": {
+        "owner": "internal/api: наблюдение порта для управляющих решений",
+        "contract": "Различать PID слушателя, подтверждённое отсутствие и отказ наблюдения. Неизвестность не разрешает kill, удаление intent или утверждение об освобождённом порте.",
+        "current": "Изменение уникально; processes.go также менялся в #662. Метрики #628 не дают полномочий управления. Сохраняется разрыв между отдельными image/SID проверками и numeric taskkill, а также отсутствие общего срока Stop.",
+        "next": "Согласовать новое наблюдение с нынешним consumer и действительным исходным process owner; закрыть весь срок операции и передачу результата, сохранив факт уже выполненной остановки при последующем неизвестном состоянии порта."
+      },
+      "remaining_work": [
+        "Keep PID/image/SID-to-numeric-taskkill identity gaps and absence of a single end-to-end stop deadline on the canonical plan.",
+        "Use an existing original-process owner where the future control path has one; do not create another authority wrapper or silently reopen by PID.",
+        "Verify combined behavior on an authorized current-master/native schedule later; no automatic rerun is authorized here."
+      ],
+      "source_findings": [
+        {
+          "id": "N659-RESIDUAL-1",
+          "classification": "confirmed retained limitation; not introduced regression",
+          "severity": "P2",
+          "head": "a3568dfe3426afaca4176d57a2310097e5214e77",
+          "location": "internal/api/install.go:3294-3311,4908-4915,4931-4974",
+          "condition": "A PID changes identity between the separate image/SID observations and numeric taskkill, or taskkill does not complete.",
+          "consequence": "The new observation contract does not bind the eventual kill to the observed process object and does not impose a whole-operation deadline.",
+          "recommendation": "Keep this as separately scoped control-owner work; do not claim #659 or one-handle status solves it."
+        }
+      ],
+      "evidence_limits": [
+        "No native/full-Go tests executed in this audit. Historical exact-head focused pass, build/vet results and full-suite failures are separate evidence.",
+        "Collector tests invoke fixture copies named netstat/wmic, not a real host inventory; they establish protocol/consumer behavior, not all OS ownership races.",
+        "taskkillProcessTreeByPID still uses unbounded exec.Command and numeric /PID /F /T; this inherited limitation is not fixed by the tri-state seam or Rust experiments."
+      ],
+      "review": {
+        "number": 659,
+        "head": "a3568dfe3426afaca4176d57a2310097e5214e77",
+        "status": "REVIEW_PENDING",
+        "head_receipts": [],
+        "head_summary": [],
+        "historical_summary": [],
+        "inline_head_count": 0,
+        "pagination_complete": true
+      },
+      "submitted_reviews": 1,
+      "inline_comments": 0,
+      "conversation_comments": 0,
+      "review_pages_complete": true,
+      "github_status_count": 0,
+      "github_check_run_count": 0,
+      "runtime_build_test_execution_in_this_audit": "NOT_RUN"
+    },
+    {
+      "number": 660,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/660",
+      "title": "fix(scheduler): preserve task query results and hidden lookups",
+      "state": "open",
+      "draft": true,
+      "author": "applicate2628",
+      "assignees": [],
+      "requested_reviewers": [],
+      "source_audit_head": "610fb30348c10be7b645b6ce43c862397b190f60",
+      "documentary_successor_already_published": null,
+      "head_branch": "fix/scheduler-hidden-task-lookup-20261119",
+      "base_branch": "master",
+      "api_reported_base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "resolved_current_base_sha": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "actual_merge_base": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "api_mergeability_at_read": {
+        "mergeable": true,
+        "state": "clean",
+        "not_acceptance": true
+      },
+      "unique_change_disposition": "RETAIN_DRAFT_NO_WHOLE_PR_ABSORPTION_PROVED",
+      "changed_path_count_from_current_base_merge_base": 28,
+      "changed_path_blobs_equal_current_master": 0,
+      "technical_owner_paths": [
+        "internal/scheduler/scheduler_com_windows.go",
+        "internal/scheduler/scheduler_windows.go",
+        "internal/scheduler/scheduler_owned_run_windows.go",
+        "internal/api/install.go",
+        "internal/api/install_task_recovery.go",
+        "internal/api/install_task_rollback.go",
+        "internal/api/adopt.go",
+        "internal/api/install_parsed_manifest.go",
+        "internal/autostart/linux.go",
+        "internal/scheduler/scheduler_xml_create_windows.go",
+        "internal/scheduler/scheduler.go",
+        "internal/api/adopt_provenance_events.go"
+      ],
+      "contract_at_pr_head": "Named Scheduler lookups include hidden tasks, missing last-result data is unknown, ordinary Create refuses an occupant, and recovery uses create-only XML registration. Install replacement retains a durable prior snapshot before deletion, classifies uncertain current mutations, and carries incomplete earlier compensation to outer provenance-preservation consumers.",
+      "mechanism_at_pr_head": "Fixed PowerShell code consumes JSON stdin through the Component Object Model (COM); operation-specific typed outcomes are separate from localized text. RunOwned verifies GUI role, canonical command, owner SID and definition before its positive start result, but cannot make external writers atomic. Ordinary Run remains schtasks without a context; Stop/Delete use bounded COM root execution. New install compensation compares observed exact XML, confirms absence and restores create-only, retaining snapshot and all causes on uncertainty. Linux literal-percent escaping is an independent residual within the same PR.",
+      "curation_ru": {
+        "owner": "scheduler + API install/adopt: задачи и восстановление",
+        "contract": "Именованный поиск видит hidden-задачи; неизвестный LastResult не равен нулю; новая замена сохраняет durable snapshot, неопределённый исход и create-only восстановление.",
+        "current": "Исправления уникальны, но pruneObsoleteServerTasks всё ещё держит снимок только в памяти, подавляет неопределённость Delete и ошибки восстановления; его ImportXML /F способен перезаписать нового владельца имени.",
+        "next": "Распространить существующий механизм snapshot/classification/create-only и тип ошибки незавершённого восстановления на prune; не создавать второй framework. Затем квалифицировать реальные Run/RunOwned/Stop/Delete, полномочия, внешнюю замену и срок всего дерева. Учитывать новый BackendRunHold master."
+      },
+      "remaining_work": [
+        "Bring pruneObsoleteServerTasks onto durable snapshot, uncertain-outcome classification, create-only restore and propagated incomplete-recovery reporting, or clearly exclude it from claimed completion.",
+        "Keep Scheduler wrapper cancellation distinct from native child-tree settlement; do not state a complete deadline for Run/Create/ImportXML.",
+        "Preserve current master BackendRunHold invariants and the actual RunOwned versus ordinary Run caller distinction.",
+        "Native task-generation, credentials/discretionary-access-control-list roundtrip and outside-writer races remain qualification limits; XML equality alone is not an atomic Scheduler generation token.",
+        "Treat Linux percent escaping as an independent responsibility; split if that materially improves review without creating duplicate PRs."
+      ],
+      "source_findings": [
+        {
+          "id": "N660-RESIDUAL-1",
+          "classification": "confirmed inherited defect retained by current PR; not a newly introduced regression",
+          "severity": "P1",
+          "head": "610fb30348c10be7b645b6ce43c862397b190f60",
+          "location": "internal/api/install.go:4333-4356; internal/scheduler/scheduler_windows.go:259-280",
+          "condition": "An obsolete task is pruned, another actor occupies the same task name, and a later install failure runs the pruning rollback closure.",
+          "consequence": "The closure calls ImportXML, whose Windows /Create /F overwrites the new occupant. The new create-only rollback guard is bypassed.",
+          "recommendation": "Use the existing create-only restore contract with observed identity/absence checks and durable prior snapshot for this pruning path."
+        },
+        {
+          "id": "N660-RESIDUAL-2",
+          "classification": "confirmed inherited defect retained by current PR; not a newly introduced regression",
+          "severity": "P2",
+          "head": "610fb30348c10be7b645b6ce43c862397b190f60",
+          "location": "internal/api/install.go:3928-3935,4333-4356",
+          "condition": "Prune Delete applies but reports failure, or a pruning ImportXML rollback fails.",
+          "consequence": "Delete failure logs and continues without an outcome observation or recovery receipt; rollback failure logs and returns through func() with no error. Neither reaches InstallSchedulerRollbackIncompleteError, so the new outer provenance-preservation rule is not activated by this uncertainty.",
+          "recommendation": "Reuse the new mutation classifier and typed aggregate error, persist the snapshot before deleting, and let incomplete pruning compensation reach install/adopt/provider boundaries."
+        }
+      ],
+      "evidence_limits": [
+        "No Scheduler, Go, PowerShell or Linux runtime executed in this audit. Historical rollback/mutation and raw XML fixture runs are source/schedule-specific.",
+        "The R23 adjacent wrapper result remains FAILED because it recorded unsupported_platform SKIP, despite exit 0 and passed root events.",
+        "CreateXMLIfAbsent suppresses registration triggers, not every future trigger or credential/ACL difference.",
+        "CommandContext terminates the PowerShell root; the current wrapper has no contained descendant settlement or WaitDelay proof.",
+        "Current tests exercise uncertain current-task mutations and earlier newly-created task compensation, but pruning tests do not model lost delete replies, concurrent replacement or failing restore."
+      ],
+      "review": {
+        "number": 660,
+        "head": "610fb30348c10be7b645b6ce43c862397b190f60",
+        "status": "REVIEW_PENDING",
+        "head_receipts": [],
+        "head_summary": [],
+        "historical_summary": [],
+        "inline_head_count": 0,
+        "pagination_complete": true
+      },
+      "submitted_reviews": 1,
+      "inline_comments": 0,
+      "conversation_comments": 8,
+      "review_pages_complete": true,
+      "github_status_count": 0,
+      "github_check_run_count": 0,
+      "runtime_build_test_execution_in_this_audit": "NOT_RUN"
+    },
+    {
+      "number": 661,
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/661",
+      "title": "test(cli): require semantic Serena conflict validation failures",
+      "state": "open",
+      "draft": true,
+      "author": "applicate2628",
+      "assignees": [],
+      "requested_reviewers": [],
+      "source_audit_head": "23ed6b5c6a942812a72e345c5d886b3310e9017e",
+      "documentary_successor_already_published": null,
+      "head_branch": "test/serena-conflict-validation-oracle-20261121",
+      "base_branch": "master",
+      "api_reported_base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "resolved_current_base_sha": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "actual_merge_base": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "api_mergeability_at_read": {
+        "mergeable": true,
+        "state": "clean",
+        "not_acceptance": true
+      },
+      "unique_change_disposition": "RETAIN_DRAFT_NO_WHOLE_PR_ABSORPTION_PROVED",
+      "changed_path_count_from_current_base_merge_base": 1,
+      "changed_path_blobs_equal_current_master": 0,
+      "technical_owner_paths": [
+        "internal/cli/install_reconcile_mcp_front_v3_test.go"
+      ],
+      "contract_at_pr_head": "Require intended domain validation failures for 30 malformed documents in both durable reader and rollback, preserving four valid cases, durable writes and reader non-entry.",
+      "mechanism_at_pr_head": "One existing test function: 34 cases, ten earlier narrow error fragments and twenty authority-shape errors. No production/API/import/global seam change. Relevant production and test file unchanged by #662.",
+      "curation_ru": {
+        "owner": "internal/cli/install_reconcile_mcp_front_v3_test.go: предметный тестовый критерий",
+        "contract": "В существующей таблице из 34 случаев требовать именно предусмотренную ошибку проверки документа, сохраняя четыре допустимых случая и настоящую durable запись.",
+        "current": "Производственный код и проверяемый файл на master не изменились от исходной базы; отрицательный критерий остаётся самостоятельным полезным исправлением, а не дубликатом #658.",
+        "next": "Сохранить отдельно и удержать точную область R25 source/overlay проверок. Полные актуальные проверки и внешний отзыв требуются отдельно; повторять адресный тест только ради новой даты не нужно."
+      },
+      "remaining_work": [
+        "Keep distinct from #658; no duplicate implementation proved.",
+        "Preserve R25 source+overlay qualification exactly.",
+        "Current full gates/external review are separate prerequisites, not a mandate for date-only microtest repetition."
+      ],
+      "source_findings": [],
+      "evidence_limits": [
+        "Static review only.",
+        "Fixes test false-positive risk, not demonstrated production authorization bypass.",
+        "Source+overlay pass is not independently executed whole current master/head."
+      ],
+      "review": {
+        "number": 661,
+        "head": "23ed6b5c6a942812a72e345c5d886b3310e9017e",
+        "status": "REVIEW_PENDING",
+        "head_receipts": [],
+        "head_summary": [],
+        "historical_summary": [],
+        "inline_head_count": 0,
+        "pagination_complete": true
+      },
+      "submitted_reviews": 0,
+      "inline_comments": 0,
+      "conversation_comments": 0,
+      "review_pages_complete": true,
+      "github_status_count": 0,
+      "github_check_run_count": 0,
+      "runtime_build_test_execution_in_this_audit": "NOT_RUN"
+    }
+  ]
+}

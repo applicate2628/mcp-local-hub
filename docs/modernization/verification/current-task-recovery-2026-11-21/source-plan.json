@@ -1,0 +1,387 @@
+{
+  "schema": 2,
+  "base_commit": "c55d9ca619f6f9301ba1113615370fc6218d608f",
+  "base_tree": "06a85c6efe53f5a4a8babbcadb7818752bb7acee",
+  "files": [
+    "internal/api/install.go",
+    "internal/api/install_scheduler_snapshot_test.go",
+    "internal/api/install_task_recovery.go",
+    "internal/api/install_task_recovery_storage_test.go",
+    "internal/api/install_task_recovery_test.go",
+    "internal/scheduler/scheduler.go",
+    "internal/scheduler/scheduler_com_windows.go",
+    "internal/scheduler/scheduler_xml_create_windows.go",
+    "internal/scheduler/scheduler_xml_create_windows_test.go"
+  ],
+  "control_paths": [
+    "internal/api/install_task_recovery_test.go",
+    "internal/api/install_scheduler_snapshot_test.go"
+  ],
+  "native_scheduler_operations": false,
+  "suites": {
+    "control": [
+      {
+        "label": "original-current-task-control",
+        "package": "mcp-local-hub/internal/api",
+        "roots": [
+          "TestExecuteInstallToCurrentTaskRecovery",
+          "TestExecuteInstallToRecoveryCapabilityRequired",
+          "TestExecuteInstallToRecoverySnapshotBeforeDelete",
+          "TestExecuteInstallToRecoverySnapshotFailureStopsReplacement",
+          "TestExecuteInstallToRejectsAliasedRecoveryNames"
+        ],
+        "count": 1,
+        "race": false,
+        "timeout_seconds": 180,
+        "direct_timeout_seconds": 480,
+        "expected_exit_code": 1,
+        "expected_events": {
+          "pass": {},
+          "fail": {
+            "TestExecuteInstallToCurrentTaskRecovery": 1,
+            "TestExecuteInstallToCurrentTaskRecovery/restored": 1,
+            "TestExecuteInstallToCurrentTaskRecovery/external_occupant": 1,
+            "TestExecuteInstallToCurrentTaskRecovery/create_applied_reply_lost": 1,
+            "TestExecuteInstallToCurrentTaskRecovery/restore_rejected": 1,
+            "TestExecuteInstallToCurrentTaskRecovery/restore_applied_reply_lost": 1,
+            "TestExecuteInstallToRecoveryCapabilityRequired": 1,
+            "TestExecuteInstallToRecoverySnapshotBeforeDelete": 1,
+            "TestExecuteInstallToRecoverySnapshotBeforeDelete/replacement_succeeds": 1,
+            "TestExecuteInstallToRecoverySnapshotBeforeDelete/delete_fails": 1,
+            "TestExecuteInstallToRecoverySnapshotFailureStopsReplacement": 1,
+            "TestExecuteInstallToRejectsAliasedRecoveryNames": 1,
+            "TestExecuteInstallToRejectsAliasedRecoveryNames/exact": 1,
+            "TestExecuteInstallToRejectsAliasedRecoveryNames/case": 1,
+            "TestExecuteInstallToRejectsAliasedRecoveryNames/root_prefix": 1,
+            "PACKAGE:mcp-local-hub/internal/api": 1
+          },
+          "skip": {}
+        },
+        "required_output": [
+          {
+            "test": "TestExecuteInstallToCurrentTaskRecovery/restored",
+            "any_of": [
+              "RECOVERY-STATE",
+              "RECOVERY-CAUSES",
+              "RECOVERY-SNAPSHOT"
+            ]
+          },
+          {
+            "test": "TestExecuteInstallToCurrentTaskRecovery/external_occupant",
+            "any_of": [
+              "RECOVERY-STATE",
+              "RECOVERY-CAUSES",
+              "RECOVERY-SNAPSHOT"
+            ]
+          },
+          {
+            "test": "TestExecuteInstallToCurrentTaskRecovery/create_applied_reply_lost",
+            "any_of": [
+              "RECOVERY-STATE",
+              "RECOVERY-CAUSES",
+              "RECOVERY-SNAPSHOT"
+            ]
+          },
+          {
+            "test": "TestExecuteInstallToCurrentTaskRecovery/restore_rejected",
+            "any_of": [
+              "RECOVERY-STATE",
+              "RECOVERY-CAUSES",
+              "RECOVERY-SNAPSHOT"
+            ]
+          },
+          {
+            "test": "TestExecuteInstallToCurrentTaskRecovery/restore_applied_reply_lost",
+            "any_of": [
+              "RECOVERY-STATE",
+              "RECOVERY-CAUSES",
+              "RECOVERY-SNAPSHOT"
+            ]
+          },
+          {
+            "test": "TestExecuteInstallToRecoveryCapabilityRequired",
+            "any_of": [
+              "RECOVERY-CAPABILITY"
+            ]
+          },
+          {
+            "test": "TestExecuteInstallToRecoverySnapshotBeforeDelete/replacement_succeeds",
+            "any_of": [
+              "RECOVERY-SNAPSHOT"
+            ]
+          },
+          {
+            "test": "TestExecuteInstallToRecoverySnapshotBeforeDelete/delete_fails",
+            "any_of": [
+              "RECOVERY-SNAPSHOT"
+            ]
+          },
+          {
+            "test": "TestExecuteInstallToRecoverySnapshotFailureStopsReplacement",
+            "any_of": [
+              "RECOVERY-STORAGE"
+            ]
+          },
+          {
+            "test": "TestExecuteInstallToRejectsAliasedRecoveryNames/exact",
+            "any_of": [
+              "RECOVERY-ALIASES"
+            ]
+          },
+          {
+            "test": "TestExecuteInstallToRejectsAliasedRecoveryNames/case",
+            "any_of": [
+              "RECOVERY-ALIASES"
+            ]
+          },
+          {
+            "test": "TestExecuteInstallToRejectsAliasedRecoveryNames/root_prefix",
+            "any_of": [
+              "RECOVERY-ALIASES"
+            ]
+          }
+        ]
+      }
+    ],
+    "candidate": [
+      {
+        "label": "current-task-recovery-race",
+        "package": "mcp-local-hub/internal/api",
+        "roots": [
+          "TestExecuteInstallToCurrentTaskRecovery",
+          "TestExecuteInstallToRecoveryCapabilityRequired",
+          "TestExecuteInstallToRecoverySnapshotBeforeDelete",
+          "TestExecuteInstallToRecoverySnapshotFailureStopsReplacement",
+          "TestExecuteInstallToRejectsAliasedRecoveryNames",
+          "TestExecuteInstallToAbsentFailureHasNoRecovery",
+          "TestSaveInstallTaskSnapshotExactBytes",
+          "TestSaveInstallTaskSnapshotRefusesExistingFile",
+          "TestSaveInstallTaskSnapshotSizeLimitBeforeWrite"
+        ],
+        "count": 2,
+        "race": true,
+        "timeout_seconds": 180,
+        "direct_timeout_seconds": 480,
+        "expected_exit_code": 0,
+        "expected_events": {
+          "pass": {
+            "TestExecuteInstallToCurrentTaskRecovery": 2,
+            "TestExecuteInstallToCurrentTaskRecovery/restored": 2,
+            "TestExecuteInstallToCurrentTaskRecovery/external_occupant": 2,
+            "TestExecuteInstallToCurrentTaskRecovery/create_applied_reply_lost": 2,
+            "TestExecuteInstallToCurrentTaskRecovery/restore_rejected": 2,
+            "TestExecuteInstallToCurrentTaskRecovery/restore_applied_reply_lost": 2,
+            "TestExecuteInstallToRecoveryCapabilityRequired": 2,
+            "TestExecuteInstallToRecoverySnapshotBeforeDelete": 2,
+            "TestExecuteInstallToRecoverySnapshotBeforeDelete/replacement_succeeds": 2,
+            "TestExecuteInstallToRecoverySnapshotBeforeDelete/delete_fails": 2,
+            "TestExecuteInstallToRecoverySnapshotFailureStopsReplacement": 2,
+            "TestExecuteInstallToRejectsAliasedRecoveryNames": 2,
+            "TestExecuteInstallToRejectsAliasedRecoveryNames/exact": 2,
+            "TestExecuteInstallToRejectsAliasedRecoveryNames/case": 2,
+            "TestExecuteInstallToRejectsAliasedRecoveryNames/root_prefix": 2,
+            "TestExecuteInstallToAbsentFailureHasNoRecovery": 2,
+            "TestSaveInstallTaskSnapshotExactBytes": 2,
+            "TestSaveInstallTaskSnapshotExactBytes/utf8": 2,
+            "TestSaveInstallTaskSnapshotExactBytes/utf16le": 2,
+            "TestSaveInstallTaskSnapshotRefusesExistingFile": 2,
+            "TestSaveInstallTaskSnapshotSizeLimitBeforeWrite": 2,
+            "PACKAGE:mcp-local-hub/internal/api": 1
+          },
+          "fail": {},
+          "skip": {}
+        },
+        "required_output": []
+      },
+      {
+        "label": "create-only-xml-race",
+        "package": "mcp-local-hub/internal/scheduler",
+        "roots": [
+          "TestCreateXMLIfAbsentPreservesDefinitionInBase64Request",
+          "TestCreateXMLIfAbsentRejectsInputBeforeDispatch",
+          "TestCreateXMLIfAbsentReturnsConflictAndUncertainTransportWithoutRetry",
+          "TestXMLCreateCOMScriptPassesExactDataAndCreateOnlyFlags",
+          "TestXMLCreateCOMScriptUnwrapsAndClassifiesNativeHRESULT",
+          "TestXMLCreateCOMScriptRejectsMalformedEncodingAndUnconfirmedRegistration"
+        ],
+        "count": 2,
+        "race": true,
+        "timeout_seconds": 180,
+        "direct_timeout_seconds": 480,
+        "expected_exit_code": 0,
+        "expected_events": {
+          "pass": {
+            "TestCreateXMLIfAbsentPreservesDefinitionInBase64Request": 2,
+            "TestCreateXMLIfAbsentRejectsInputBeforeDispatch": 2,
+            "TestCreateXMLIfAbsentReturnsConflictAndUncertainTransportWithoutRetry": 2,
+            "TestCreateXMLIfAbsentReturnsConflictAndUncertainTransportWithoutRetry/conflict": 2,
+            "TestCreateXMLIfAbsentReturnsConflictAndUncertainTransportWithoutRetry/permission": 2,
+            "TestCreateXMLIfAbsentReturnsConflictAndUncertainTransportWithoutRetry/corrupt": 2,
+            "TestCreateXMLIfAbsentReturnsConflictAndUncertainTransportWithoutRetry/unconfirmed": 2,
+            "TestCreateXMLIfAbsentReturnsConflictAndUncertainTransportWithoutRetry/lost_reply": 2,
+            "TestXMLCreateCOMScriptPassesExactDataAndCreateOnlyFlags": 2,
+            "TestXMLCreateCOMScriptUnwrapsAndClassifiesNativeHRESULT": 2,
+            "TestXMLCreateCOMScriptUnwrapsAndClassifiesNativeHRESULT/800700b7": 2,
+            "TestXMLCreateCOMScriptUnwrapsAndClassifiesNativeHRESULT/80070005": 2,
+            "TestXMLCreateCOMScriptUnwrapsAndClassifiesNativeHRESULT/80070057": 2,
+            "TestXMLCreateCOMScriptUnwrapsAndClassifiesNativeHRESULT/80041316": 2,
+            "TestXMLCreateCOMScriptUnwrapsAndClassifiesNativeHRESULT/80041317": 2,
+            "TestXMLCreateCOMScriptUnwrapsAndClassifiesNativeHRESULT/80041318": 2,
+            "TestXMLCreateCOMScriptUnwrapsAndClassifiesNativeHRESULT/80041319": 2,
+            "TestXMLCreateCOMScriptUnwrapsAndClassifiesNativeHRESULT/8004131a": 2,
+            "TestXMLCreateCOMScriptUnwrapsAndClassifiesNativeHRESULT/8004131d": 2,
+            "TestXMLCreateCOMScriptUnwrapsAndClassifiesNativeHRESULT/80041322": 2,
+            "TestXMLCreateCOMScriptRejectsMalformedEncodingAndUnconfirmedRegistration": 2,
+            "PACKAGE:mcp-local-hub/internal/scheduler": 1
+          },
+          "fail": {},
+          "skip": {}
+        },
+        "required_output": []
+      }
+    ],
+    "adjacent": [
+      {
+        "label": "snapshot-and-pass-a-pass-b-race",
+        "package": "mcp-local-hub/internal/api",
+        "roots": [
+          "TestExecuteInstallToSnapshotFailurePreservesTask",
+          "TestExecuteInstallToAbsentSnapshotCreatesWithoutDelete",
+          "TestExecuteInstallToAbsentSnapshotCreateConflictPreservesTask",
+          "TestExecuteInstallToDeleteFailurePreservesTask",
+          "TestExecuteInstallToSnapshotRefusalRollsBackEarlierTask",
+          "TestExecuteInstallTo_PassAPassB_Separation"
+        ],
+        "count": 2,
+        "race": true,
+        "timeout_seconds": 180,
+        "direct_timeout_seconds": 480,
+        "expected_exit_code": 0,
+        "expected_events": {
+          "pass": {
+            "TestExecuteInstallToSnapshotFailurePreservesTask": 2,
+            "TestExecuteInstallToSnapshotFailurePreservesTask/unavailable": 2,
+            "TestExecuteInstallToSnapshotFailurePreservesTask/partial_permission_error": 2,
+            "TestExecuteInstallToSnapshotFailurePreservesTask/unsupported": 2,
+            "TestExecuteInstallToSnapshotFailurePreservesTask/nil_success": 2,
+            "TestExecuteInstallToSnapshotFailurePreservesTask/empty_success": 2,
+            "TestExecuteInstallToSnapshotFailurePreservesTask/conflicting_absence": 2,
+            "TestExecuteInstallToAbsentSnapshotCreatesWithoutDelete": 2,
+            "TestExecuteInstallToAbsentSnapshotCreatesWithoutDelete/direct": 2,
+            "TestExecuteInstallToAbsentSnapshotCreatesWithoutDelete/wrapped": 2,
+            "TestExecuteInstallToAbsentSnapshotCreateConflictPreservesTask": 2,
+            "TestExecuteInstallToDeleteFailurePreservesTask": 2,
+            "TestExecuteInstallToSnapshotRefusalRollsBackEarlierTask": 2,
+            "TestExecuteInstallToSnapshotRefusalRollsBackEarlierTask/export": 2,
+            "TestExecuteInstallToSnapshotRefusalRollsBackEarlierTask/delete": 2,
+            "TestExecuteInstallTo_PassAPassB_Separation": 2,
+            "TestExecuteInstallTo_PassAPassB_Separation/startTasks_false_skips_pass_b": 2,
+            "TestExecuteInstallTo_PassAPassB_Separation/startTasks_true_runs_only_logon_tasks": 2,
+            "TestExecuteInstallTo_PassAPassB_Separation/pass_b_run_failure_does_not_roll_back": 2,
+            "PACKAGE:mcp-local-hub/internal/api": 1
+          },
+          "fail": {},
+          "skip": {}
+        },
+        "required_output": []
+      }
+    ],
+    "published": [
+      {
+        "label": "current-task-recovery-race",
+        "package": "mcp-local-hub/internal/api",
+        "roots": [
+          "TestExecuteInstallToCurrentTaskRecovery",
+          "TestExecuteInstallToRecoveryCapabilityRequired",
+          "TestExecuteInstallToRecoverySnapshotBeforeDelete",
+          "TestExecuteInstallToRecoverySnapshotFailureStopsReplacement",
+          "TestExecuteInstallToRejectsAliasedRecoveryNames",
+          "TestExecuteInstallToAbsentFailureHasNoRecovery",
+          "TestSaveInstallTaskSnapshotExactBytes",
+          "TestSaveInstallTaskSnapshotRefusesExistingFile",
+          "TestSaveInstallTaskSnapshotSizeLimitBeforeWrite"
+        ],
+        "count": 2,
+        "race": true,
+        "timeout_seconds": 180,
+        "direct_timeout_seconds": 480,
+        "expected_exit_code": 0,
+        "expected_events": {
+          "pass": {
+            "TestExecuteInstallToCurrentTaskRecovery": 2,
+            "TestExecuteInstallToCurrentTaskRecovery/restored": 2,
+            "TestExecuteInstallToCurrentTaskRecovery/external_occupant": 2,
+            "TestExecuteInstallToCurrentTaskRecovery/create_applied_reply_lost": 2,
+            "TestExecuteInstallToCurrentTaskRecovery/restore_rejected": 2,
+            "TestExecuteInstallToCurrentTaskRecovery/restore_applied_reply_lost": 2,
+            "TestExecuteInstallToRecoveryCapabilityRequired": 2,
+            "TestExecuteInstallToRecoverySnapshotBeforeDelete": 2,
+            "TestExecuteInstallToRecoverySnapshotBeforeDelete/replacement_succeeds": 2,
+            "TestExecuteInstallToRecoverySnapshotBeforeDelete/delete_fails": 2,
+            "TestExecuteInstallToRecoverySnapshotFailureStopsReplacement": 2,
+            "TestExecuteInstallToRejectsAliasedRecoveryNames": 2,
+            "TestExecuteInstallToRejectsAliasedRecoveryNames/exact": 2,
+            "TestExecuteInstallToRejectsAliasedRecoveryNames/case": 2,
+            "TestExecuteInstallToRejectsAliasedRecoveryNames/root_prefix": 2,
+            "TestExecuteInstallToAbsentFailureHasNoRecovery": 2,
+            "TestSaveInstallTaskSnapshotExactBytes": 2,
+            "TestSaveInstallTaskSnapshotExactBytes/utf8": 2,
+            "TestSaveInstallTaskSnapshotExactBytes/utf16le": 2,
+            "TestSaveInstallTaskSnapshotRefusesExistingFile": 2,
+            "TestSaveInstallTaskSnapshotSizeLimitBeforeWrite": 2,
+            "PACKAGE:mcp-local-hub/internal/api": 1
+          },
+          "fail": {},
+          "skip": {}
+        },
+        "required_output": []
+      },
+      {
+        "label": "create-only-xml-race",
+        "package": "mcp-local-hub/internal/scheduler",
+        "roots": [
+          "TestCreateXMLIfAbsentPreservesDefinitionInBase64Request",
+          "TestCreateXMLIfAbsentRejectsInputBeforeDispatch",
+          "TestCreateXMLIfAbsentReturnsConflictAndUncertainTransportWithoutRetry",
+          "TestXMLCreateCOMScriptPassesExactDataAndCreateOnlyFlags",
+          "TestXMLCreateCOMScriptUnwrapsAndClassifiesNativeHRESULT",
+          "TestXMLCreateCOMScriptRejectsMalformedEncodingAndUnconfirmedRegistration"
+        ],
+        "count": 2,
+        "race": true,
+        "timeout_seconds": 180,
+        "direct_timeout_seconds": 480,
+        "expected_exit_code": 0,
+        "expected_events": {
+          "pass": {
+            "TestCreateXMLIfAbsentPreservesDefinitionInBase64Request": 2,
+            "TestCreateXMLIfAbsentRejectsInputBeforeDispatch": 2,
+            "TestCreateXMLIfAbsentReturnsConflictAndUncertainTransportWithoutRetry": 2,
+            "TestCreateXMLIfAbsentReturnsConflictAndUncertainTransportWithoutRetry/conflict": 2,
+            "TestCreateXMLIfAbsentReturnsConflictAndUncertainTransportWithoutRetry/permission": 2,
+            "TestCreateXMLIfAbsentReturnsConflictAndUncertainTransportWithoutRetry/corrupt": 2,
+            "TestCreateXMLIfAbsentReturnsConflictAndUncertainTransportWithoutRetry/unconfirmed": 2,
+            "TestCreateXMLIfAbsentReturnsConflictAndUncertainTransportWithoutRetry/lost_reply": 2,
+            "TestXMLCreateCOMScriptPassesExactDataAndCreateOnlyFlags": 2,
+            "TestXMLCreateCOMScriptUnwrapsAndClassifiesNativeHRESULT": 2,
+            "TestXMLCreateCOMScriptUnwrapsAndClassifiesNativeHRESULT/800700b7": 2,
+            "TestXMLCreateCOMScriptUnwrapsAndClassifiesNativeHRESULT/80070005": 2,
+            "TestXMLCreateCOMScriptUnwrapsAndClassifiesNativeHRESULT/80070057": 2,
+            "TestXMLCreateCOMScriptUnwrapsAndClassifiesNativeHRESULT/80041316": 2,
+            "TestXMLCreateCOMScriptUnwrapsAndClassifiesNativeHRESULT/80041317": 2,
+            "TestXMLCreateCOMScriptUnwrapsAndClassifiesNativeHRESULT/80041318": 2,
+            "TestXMLCreateCOMScriptUnwrapsAndClassifiesNativeHRESULT/80041319": 2,
+            "TestXMLCreateCOMScriptUnwrapsAndClassifiesNativeHRESULT/8004131a": 2,
+            "TestXMLCreateCOMScriptUnwrapsAndClassifiesNativeHRESULT/8004131d": 2,
+            "TestXMLCreateCOMScriptUnwrapsAndClassifiesNativeHRESULT/80041322": 2,
+            "TestXMLCreateCOMScriptRejectsMalformedEncodingAndUnconfirmedRegistration": 2,
+            "PACKAGE:mcp-local-hub/internal/scheduler": 1
+          },
+          "fail": {},
+          "skip": {}
+        },
+        "required_output": []
+      }
+    ]
+  }
+}

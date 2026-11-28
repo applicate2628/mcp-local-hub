@@ -1,0 +1,21 @@
+{
+  "schema": "r25-budget-reducer-selfcheck-v1",
+  "synthetic_only": true,
+  "go_tests_executed": false,
+  "checks": [
+    "synthetic-complete-190-phases",
+    "synthetic-aggregate-count-and-sum",
+    "synthetic-missing-phase",
+    "synthetic-duplicate-phase",
+    "synthetic-missing-root-run",
+    "synthetic-skip",
+    "synthetic-duplicate-package-pass",
+    "synthetic-wrong-package-phase",
+    "synthetic-malformed-phase",
+    "synthetic-invalid-event-types",
+    "synthetic-non-json",
+    "synthetic-nonzero-exit"
+  ],
+  "script_sha256": "26f0c4ac7ada74c1409125dc4b62ce648b558651463d5a4ba52510187c7ce50a",
+  "source_and_overlay_runtime_qualification": false
+}

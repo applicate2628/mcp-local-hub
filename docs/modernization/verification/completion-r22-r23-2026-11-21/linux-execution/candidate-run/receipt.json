@@ -1,0 +1,144 @@
+{
+  "label": "candidate-run",
+  "binary_sha256": "7909a802fa287d3460127ed328c6f22a50cf2552af0acd9a81f6e61a7a3e8182",
+  "args": [
+    "-test.v",
+    "-test.run=^(TestRenderLinuxUnit_PreservesLiteralPercent|TestLinuxBackend_PercentPathRoundTripAndLegacyDrift)$",
+    "-test.count=2",
+    "-test.timeout=30s"
+  ],
+  "platform": "Linux-6.18.57-x86_64-with-glibc2.41",
+  "started_utc": "2026-11-21T09:03:33.106779+00:00",
+  "direct_timeout_seconds": 45,
+  "source_commit": "ba17867125b3728fb734e90b383639a3ff9175ee",
+  "format": "Go verbose test protocol; no package JSON events",
+  "native_service_operations": false,
+  "race_detector": false,
+  "pid": 10,
+  "exit_code": 0,
+  "settled": true,
+  "seconds": 0.01597638998646289,
+  "stdout": {
+    "bytes": 4069,
+    "sha256": "119db653209e2d61e38cf870440bd831da9696ad4a19301bbc657d065c2a2c0c"
+  },
+  "stderr": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "test_events": [
+    {
+      "action": "PASS",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent"
+    },
+    {
+      "action": "PASS",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent/plain-normal"
+    },
+    {
+      "action": "PASS",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent/plain-strict"
+    },
+    {
+      "action": "PASS",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent/single-normal"
+    },
+    {
+      "action": "PASS",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent/single-strict"
+    },
+    {
+      "action": "PASS",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent/specifier-normal"
+    },
+    {
+      "action": "PASS",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent/specifier-strict"
+    },
+    {
+      "action": "PASS",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent/unknown-normal"
+    },
+    {
+      "action": "PASS",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent/unknown-strict"
+    },
+    {
+      "action": "PASS",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent/double-normal"
+    },
+    {
+      "action": "PASS",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent/double-strict"
+    },
+    {
+      "action": "PASS",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent/mixed-normal"
+    },
+    {
+      "action": "PASS",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent/mixed-strict"
+    },
+    {
+      "action": "PASS",
+      "name": "TestLinuxBackend_PercentPathRoundTripAndLegacyDrift"
+    },
+    {
+      "action": "PASS",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent"
+    },
+    {
+      "action": "PASS",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent/plain-normal"
+    },
+    {
+      "action": "PASS",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent/plain-strict"
+    },
+    {
+      "action": "PASS",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent/single-normal"
+    },
+    {
+      "action": "PASS",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent/single-strict"
+    },
+    {
+      "action": "PASS",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent/specifier-normal"
+    },
+    {
+      "action": "PASS",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent/specifier-strict"
+    },
+    {
+      "action": "PASS",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent/unknown-normal"
+    },
+    {
+      "action": "PASS",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent/unknown-strict"
+    },
+    {
+      "action": "PASS",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent/double-normal"
+    },
+    {
+      "action": "PASS",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent/double-strict"
+    },
+    {
+      "action": "PASS",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent/mixed-normal"
+    },
+    {
+      "action": "PASS",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent/mixed-strict"
+    },
+    {
+      "action": "PASS",
+      "name": "TestLinuxBackend_PercentPathRoundTripAndLegacyDrift"
+    }
+  ],
+  "oracle_matched": true
+}

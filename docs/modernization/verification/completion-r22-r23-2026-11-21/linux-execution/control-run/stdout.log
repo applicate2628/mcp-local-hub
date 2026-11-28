@@ -1,0 +1,40 @@
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent/plain-normal
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent/plain-strict
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent/single-normal
+    linux_exec_percent_test.go:39: SYSTEMD-PERCENT: ExecStart="ExecStart=\"/opt/100%/mcphub\" supervise", want "ExecStart=\"/opt/100%%/mcphub\" supervise"
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent/single-strict
+    linux_exec_percent_test.go:39: SYSTEMD-PERCENT: ExecStart="ExecStart=\"/opt/100%/mcphub\" supervise --strict-mode", want "ExecStart=\"/opt/100%%/mcphub\" supervise --strict-mode"
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent/specifier-normal
+    linux_exec_percent_test.go:39: SYSTEMD-PERCENT: ExecStart="ExecStart=\"/opt/release-%n/mcphub\" supervise", want "ExecStart=\"/opt/release-%%n/mcphub\" supervise"
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent/specifier-strict
+    linux_exec_percent_test.go:39: SYSTEMD-PERCENT: ExecStart="ExecStart=\"/opt/release-%n/mcphub\" supervise --strict-mode", want "ExecStart=\"/opt/release-%%n/mcphub\" supervise --strict-mode"
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent/unknown-normal
+    linux_exec_percent_test.go:39: SYSTEMD-PERCENT: ExecStart="ExecStart=\"/opt/release-%Z/mcphub\" supervise", want "ExecStart=\"/opt/release-%%Z/mcphub\" supervise"
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent/unknown-strict
+    linux_exec_percent_test.go:39: SYSTEMD-PERCENT: ExecStart="ExecStart=\"/opt/release-%Z/mcphub\" supervise --strict-mode", want "ExecStart=\"/opt/release-%%Z/mcphub\" supervise --strict-mode"
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent/double-normal
+    linux_exec_percent_test.go:39: SYSTEMD-PERCENT: ExecStart="ExecStart=\"/opt/100%%/mcphub\" supervise", want "ExecStart=\"/opt/100%%%%/mcphub\" supervise"
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent/double-strict
+    linux_exec_percent_test.go:39: SYSTEMD-PERCENT: ExecStart="ExecStart=\"/opt/100%%/mcphub\" supervise --strict-mode", want "ExecStart=\"/opt/100%%%%/mcphub\" supervise --strict-mode"
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent/mixed-normal
+    linux_exec_percent_test.go:39: SYSTEMD-PERCENT: ExecStart="ExecStart=\"/home/Дмитрий/My %n \\\"Tools\\\"\\\\bin/mcphub\" supervise", want "ExecStart=\"/home/Дмитрий/My %%n \\\"Tools\\\"\\\\bin/mcphub\" supervise"
+=== RUN   TestRenderLinuxUnit_PreservesLiteralPercent/mixed-strict
+    linux_exec_percent_test.go:39: SYSTEMD-PERCENT: ExecStart="ExecStart=\"/home/Дмитрий/My %n \\\"Tools\\\"\\\\bin/mcphub\" supervise --strict-mode", want "ExecStart=\"/home/Дмитрий/My %%n \\\"Tools\\\"\\\\bin/mcphub\" supervise --strict-mode"
+--- FAIL: TestRenderLinuxUnit_PreservesLiteralPercent (0.00s)
+    --- PASS: TestRenderLinuxUnit_PreservesLiteralPercent/plain-normal (0.00s)
+    --- PASS: TestRenderLinuxUnit_PreservesLiteralPercent/plain-strict (0.00s)
+    --- FAIL: TestRenderLinuxUnit_PreservesLiteralPercent/single-normal (0.00s)
+    --- FAIL: TestRenderLinuxUnit_PreservesLiteralPercent/single-strict (0.00s)
+    --- FAIL: TestRenderLinuxUnit_PreservesLiteralPercent/specifier-normal (0.00s)
+    --- FAIL: TestRenderLinuxUnit_PreservesLiteralPercent/specifier-strict (0.00s)
+    --- FAIL: TestRenderLinuxUnit_PreservesLiteralPercent/unknown-normal (0.00s)
+    --- FAIL: TestRenderLinuxUnit_PreservesLiteralPercent/unknown-strict (0.00s)
+    --- FAIL: TestRenderLinuxUnit_PreservesLiteralPercent/double-normal (0.00s)
+    --- FAIL: TestRenderLinuxUnit_PreservesLiteralPercent/double-strict (0.00s)
+    --- FAIL: TestRenderLinuxUnit_PreservesLiteralPercent/mixed-normal (0.00s)
+    --- FAIL: TestRenderLinuxUnit_PreservesLiteralPercent/mixed-strict (0.00s)
+=== RUN   TestLinuxBackend_PercentPathRoundTripAndLegacyDrift
+    linux_exec_percent_test.go:65: SYSTEMD-PERCENT-WRITE: got "ExecStart=\"/opt/release-%n/mcphub\" supervise", want "ExecStart=\"/opt/release-%%n/mcphub\" supervise"
+--- FAIL: TestLinuxBackend_PercentPathRoundTripAndLegacyDrift (0.01s)
+FAIL

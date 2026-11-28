@@ -1,0 +1,143 @@
+{
+  "schema": "r24-public-archive-verification-v1",
+  "archive_integrity": "PASS",
+  "internal_evidence_consistency": "PASS",
+  "runtime_authentication": "NOT_ESTABLISHED",
+  "archive_bytes": 1778839,
+  "archive_sha256": "099f6b1a26cb99e87fc765ad9ef54370510e06d5c951e91ac4a3472dddc7500d",
+  "external_archive_pin_matched": true,
+  "zip_members": 2714,
+  "verified_input_files": 2712,
+  "changed_public_files": 0,
+  "verified_phases": 15,
+  "verified_candidate_go_files": 13,
+  "verified_test_commands": 11,
+  "verified_build_vet_commands": 10,
+  "reconstructed_totals": {
+    "root_pass_events": 57,
+    "test_and_subtest_pass_events": 305,
+    "leaf_pass_events": 270,
+    "package_pass_events": 11,
+    "fail_events": 0,
+    "skip_events": 0
+  },
+  "commands": [
+    {
+      "scope": "pr635",
+      "label": "test-1-default",
+      "root_pass_events": 1,
+      "test_and_subtest_pass_events": 11,
+      "leaf_pass_events": 9,
+      "package_pass_events": 1,
+      "fail_events": 0,
+      "skip_events": 0
+    },
+    {
+      "scope": "pr635",
+      "label": "test-1-state-tag",
+      "root_pass_events": 1,
+      "test_and_subtest_pass_events": 11,
+      "leaf_pass_events": 9,
+      "package_pass_events": 1,
+      "fail_events": 0,
+      "skip_events": 0
+    },
+    {
+      "scope": "pr637",
+      "label": "test-1-default",
+      "root_pass_events": 1,
+      "test_and_subtest_pass_events": 11,
+      "leaf_pass_events": 9,
+      "package_pass_events": 1,
+      "fail_events": 0,
+      "skip_events": 0
+    },
+    {
+      "scope": "pr637",
+      "label": "test-1-state-tag",
+      "root_pass_events": 1,
+      "test_and_subtest_pass_events": 11,
+      "leaf_pass_events": 9,
+      "package_pass_events": 1,
+      "fail_events": 0,
+      "skip_events": 0
+    },
+    {
+      "scope": "pr637",
+      "label": "test-2-default",
+      "root_pass_events": 3,
+      "test_and_subtest_pass_events": 13,
+      "leaf_pass_events": 12,
+      "package_pass_events": 1,
+      "fail_events": 0,
+      "skip_events": 0
+    },
+    {
+      "scope": "pr643",
+      "label": "test-1-default",
+      "root_pass_events": 10,
+      "test_and_subtest_pass_events": 56,
+      "leaf_pass_events": 52,
+      "package_pass_events": 1,
+      "fail_events": 0,
+      "skip_events": 0
+    },
+    {
+      "scope": "pr643",
+      "label": "test-1-state-tag",
+      "root_pass_events": 10,
+      "test_and_subtest_pass_events": 56,
+      "leaf_pass_events": 52,
+      "package_pass_events": 1,
+      "fail_events": 0,
+      "skip_events": 0
+    },
+    {
+      "scope": "pr647",
+      "label": "test-1-default",
+      "root_pass_events": 4,
+      "test_and_subtest_pass_events": 21,
+      "leaf_pass_events": 19,
+      "package_pass_events": 1,
+      "fail_events": 0,
+      "skip_events": 0
+    },
+    {
+      "scope": "pr647",
+      "label": "test-1-state-tag",
+      "root_pass_events": 4,
+      "test_and_subtest_pass_events": 21,
+      "leaf_pass_events": 19,
+      "package_pass_events": 1,
+      "fail_events": 0,
+      "skip_events": 0
+    },
+    {
+      "scope": "pr650",
+      "label": "test-1-default",
+      "root_pass_events": 11,
+      "test_and_subtest_pass_events": 47,
+      "leaf_pass_events": 40,
+      "package_pass_events": 1,
+      "fail_events": 0,
+      "skip_events": 0
+    },
+    {
+      "scope": "pr650",
+      "label": "test-1-state-tag",
+      "root_pass_events": 11,
+      "test_and_subtest_pass_events": 47,
+      "leaf_pass_events": 40,
+      "package_pass_events": 1,
+      "fail_events": 0,
+      "skip_events": 0
+    }
+  ],
+  "limits": [
+    "ZIP integrity and evidence consistency do not authenticate execution, machine identity or publication provenance.",
+    "Without an externally trusted archive digest the manifest and its files can be replaced together.",
+    "For changed public files, original hashes and redaction correctness remain claims; only public bytes are directly verified.",
+    "This does not run tests, read installed tools, repeat native operations, or qualify full test gates and process-tree settlement.",
+    "CAPTURED_FOR_ARCHIVE is the embedded snapshot state; the separate packaging completion marker is not inside this ZIP."
+  ]
+}

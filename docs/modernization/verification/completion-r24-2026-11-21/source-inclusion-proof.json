@@ -1,0 +1,245 @@
+{
+  "schema": "r24-donor-closure-source-inclusion-v1",
+  "created_at_utc": "2026-11-21T11:12:57.179869+00:00",
+  "repository": "applicate2628/mcp-local-hub",
+  "scope": "Static source inclusion only. No product/test execution, GitHub mutation or PR merge performed. Candidate identities are local; closure requires later published readback.",
+  "proof_semantics": {
+    "full_reverse_patch": "Entire donor patch reverses cleanly from candidate. Reversing every donor for a target exactly reconstructs its original tree; shared-owner changes are not counted as absorbed merely by overlapping filenames.",
+    "ancestor_and_14_identical_changed_file_blobs": "The entire original donor commit is already an ancestor; all 14 changed file blobs match both original target and proposed target tree."
+  },
+  "targets": [
+    {
+      "target_pr": 647,
+      "candidate_tree": "5e0192aec3522f3dd2f1f6110910cf3274fb0b38",
+      "target_original_tree": "a332fbfe30ea19944e119e64398f39db90ac6faa",
+      "reverse_source_order": [
+        639
+      ],
+      "steps": [
+        {
+          "source_pr": 639,
+          "result_tree": "a332fbfe30ea19944e119e64398f39db90ac6faa"
+        }
+      ],
+      "reconstructed_target_tree": "a332fbfe30ea19944e119e64398f39db90ac6faa",
+      "exact_match": true
+    },
+    {
+      "target_pr": 643,
+      "candidate_tree": "b658184e7c7a421f973acf71f6309abb19f1b775",
+      "target_original_tree": "d3b2757f30983120072826916f7a0e3b4d0da251",
+      "reverse_source_order": [
+        651,
+        645
+      ],
+      "steps": [
+        {
+          "source_pr": 651,
+          "result_tree": "5a6c262e51a9fcb05e6635be2ec6a62bdb6d6d33"
+        },
+        {
+          "source_pr": 645,
+          "result_tree": "d3b2757f30983120072826916f7a0e3b4d0da251"
+        }
+      ],
+      "reconstructed_target_tree": "d3b2757f30983120072826916f7a0e3b4d0da251",
+      "exact_match": true
+    },
+    {
+      "target_pr": 650,
+      "candidate_tree": "712f175be713b1d27843942a31fadf8edd56e61a",
+      "target_original_tree": "6c13b71bfa8ea66490aa49a96484e24cf6d4b3d4",
+      "reverse_source_order": [
+        656
+      ],
+      "steps": [
+        {
+          "source_pr": 656,
+          "result_tree": "6c13b71bfa8ea66490aa49a96484e24cf6d4b3d4"
+        }
+      ],
+      "reconstructed_target_tree": "6c13b71bfa8ea66490aa49a96484e24cf6d4b3d4",
+      "exact_match": true
+    }
+  ],
+  "donors": [
+    {
+      "source_pr": 639,
+      "source_head": "98c4b54a69f2776fdabc2b8b8d19f09110e02a74",
+      "source_patch_base": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "target_pr": 647,
+      "target_original_head": "6de482cdd09034f71b5e091cc9e385e229cd96a2",
+      "target_candidate_commit_if_created": "ac97c015bd7eb5262b657bae5e89cb5830c88e8d",
+      "target_candidate_tree": "5e0192aec3522f3dd2f1f6110910cf3274fb0b38",
+      "proof_type": "full_reverse_patch",
+      "complete_reverse_patch_applies": true,
+      "reverse_result_tree": "a332fbfe30ea19944e119e64398f39db90ac6faa",
+      "combined_reverse_sequence_target": 647,
+      "donor_tests_preserved_byte_for_byte": [
+        {
+          "path": "internal/api/serena_build_environment_python_test.go",
+          "sha256": "64e862f0f2455047249429eb62c301c8255269dea57cd847216f19b0ad671e50",
+          "blob": "9d98ebe99206e869fe28b2fb0b33e5448ea65040"
+        }
+      ],
+      "source_patch": {
+        "path": "serena-build/patches/pr-639.patch",
+        "sha256": "72dac16125e30551eb5bd3c5354bf7fb54c435b69f3bb97ca5996308bb37bdfe"
+      },
+      "existing_evidence": [
+        {
+          "path": "serena-build/inclusion-evidence.json",
+          "sha256": "25dfb5fa6b3da5dce5abee60697881c6b7c4bbbe06b36ae265ee9a1491c4fc7a"
+        }
+      ],
+      "history": "Candidate appends exactly one original-target parent; donor source retained as provenance, not claimed as ancestor.",
+      "publication_readback": "PENDING_ROOT_PUBLICATION_AND_READBACK",
+      "closure": "NOT_PERFORMED"
+    },
+    {
+      "source_pr": 645,
+      "source_head": "98511ab9ea633b7e47e825396f002dc783c51d9f",
+      "source_patch_base": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "target_pr": 643,
+      "target_original_head": "527574928335142d95bc073c6ca4459fef9f9f90",
+      "target_candidate_commit_if_created": "e4371eb52f3aee5ac869861c20547e7b50cf3e28",
+      "target_candidate_tree": "b658184e7c7a421f973acf71f6309abb19f1b775",
+      "proof_type": "full_reverse_patch",
+      "complete_reverse_patch_applies": true,
+      "reverse_result_tree": "20c839866d1c5a46c8ee1709a26e039f0edd7afb",
+      "combined_reverse_sequence_target": 643,
+      "donor_tests_preserved_byte_for_byte": [
+        {
+          "path": "internal/api/serena_owned_tree_streams_windows_test.go",
+          "sha256": "a2ba550535cc6d56e7972d450f8bba147271af146d2b2407040052ac162b9dc2",
+          "blob": "231f97a2d0258a3457bc3fc9461ca8e1ec33f746"
+        }
+      ],
+      "source_patch": {
+        "path": "serena-build/patches/pr-645.patch",
+        "sha256": "ab0329b22e01466b51078ef85de1757f0968aae0a1e488c3cf94d2f0543d3172"
+      },
+      "existing_evidence": [
+        {
+          "path": "serena-build/inclusion-evidence.json",
+          "sha256": "25dfb5fa6b3da5dce5abee60697881c6b7c4bbbe06b36ae265ee9a1491c4fc7a"
+        }
+      ],
+      "history": "Candidate appends exactly one original-target parent; donor source retained as provenance, not claimed as ancestor.",
+      "publication_readback": "PENDING_ROOT_PUBLICATION_AND_READBACK",
+      "closure": "NOT_PERFORMED"
+    },
+    {
+      "source_pr": 651,
+      "source_head": "01c08819cb0d3fc4fe2b9e11833e40de3c28c3d6",
+      "source_patch_base": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "target_pr": 643,
+      "target_original_head": "527574928335142d95bc073c6ca4459fef9f9f90",
+      "target_candidate_commit_if_created": "e4371eb52f3aee5ac869861c20547e7b50cf3e28",
+      "target_candidate_tree": "b658184e7c7a421f973acf71f6309abb19f1b775",
+      "proof_type": "full_reverse_patch",
+      "complete_reverse_patch_applies": true,
+      "reverse_result_tree": "5a6c262e51a9fcb05e6635be2ec6a62bdb6d6d33",
+      "combined_reverse_sequence_target": 643,
+      "donor_tests_preserved_byte_for_byte": [
+        {
+          "path": "internal/api/serena_owned_tree_delete_windows_test.go",
+          "sha256": "8792ca17eb87dc4033753f210f4fe1b34a9ff7d5a4d0d3ed5701f76eb80056b3",
+          "blob": "15d362aa9d6f3c1664b07de596d4cc5616eb9dca"
+        }
+      ],
+      "source_patch": {
+        "path": "serena-build/patches/pr-651.patch",
+        "sha256": "7de51ab6d54cbb35ee490735f030ff21cf636e690d53c09b9565cff319ba89a6"
+      },
+      "existing_evidence": [
+        {
+          "path": "serena-build/inclusion-evidence.json",
+          "sha256": "25dfb5fa6b3da5dce5abee60697881c6b7c4bbbe06b36ae265ee9a1491c4fc7a"
+        }
+      ],
+      "history": "Candidate appends exactly one original-target parent; donor source retained as provenance, not claimed as ancestor.",
+      "publication_readback": "PENDING_ROOT_PUBLICATION_AND_READBACK",
+      "closure": "NOT_PERFORMED"
+    },
+    {
+      "source_pr": 656,
+      "source_head": "5efac36d1e2b4be998fadfa4ccfed1a5da098cff",
+      "source_patch_base": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "target_pr": 650,
+      "target_original_head": "686a54c0efbe9f99cb6ffa8d6480b289c6f465bf",
+      "target_candidate_commit_if_created": null,
+      "target_candidate_tree": "712f175be713b1d27843942a31fadf8edd56e61a",
+      "proof_type": "full_reverse_patch",
+      "complete_reverse_patch_applies": true,
+      "reverse_result_tree": "6c13b71bfa8ea66490aa49a96484e24cf6d4b3d4",
+      "combined_reverse_sequence_target": 650,
+      "donor_tests_preserved_byte_for_byte": [
+        {
+          "path": "internal/daemon/relay_qualification_connection_close_test.go",
+          "sha256": "ee7cd70c05cd6f6cd9c417d892b202253e58b6e8ed642365ff849973bfa05734",
+          "blob": "687f22f38b3acefe67ebe14a7f0b8cdb2fbd5202"
+        }
+      ],
+      "source_patch": {
+        "path": "serena-qualification/patches/pr-656.patch",
+        "sha256": "d0263d135d1d4458a4d08524791a5da09d3e58e10637b8458ccae8abe9c3682c"
+      },
+      "existing_evidence": [
+        {
+          "path": "serena-qualification/candidate-pr-650/candidate-manifest.json",
+          "sha256": "170d7bf9761e98aa8ba465bb0ac4cd91d1aa2f7f8fe1e2cbc76fc6934c8141a3"
+        }
+      ],
+      "history": "Candidate appends exactly one original-target parent; donor source retained as provenance, not claimed as ancestor.",
+      "publication_readback": "PENDING_ROOT_PUBLICATION_AND_READBACK",
+      "closure": "NOT_PERFORMED"
+    },
+    {
+      "source_pr": 636,
+      "source_head": "acac454e539a6b951d4b6ee998cc2142ee153069",
+      "source_patch_base": "6ca53c83aa4f8ccca9bc0eae3d91f3fff9ede109",
+      "target_pr": 637,
+      "target_original_head": "2542d63d2f917dc414a387e0ed2ceb494d118cfe",
+      "target_candidate_commit_if_created": null,
+      "target_candidate_tree": "940dfb102e62d599ac453f0afd41a1c0d3b87351",
+      "proof_type": "ancestor_and_14_identical_changed_file_blobs",
+      "source_is_ancestor_of_target_original": true,
+      "exact_changed_file_blob_count": 14,
+      "all_14_blobs_identical_in_original_and_candidate": true,
+      "source_patch": {
+        "path": "serena-qualification/patches/pr-636.patch",
+        "sha256": "4e688ddd0aed0868c7f29ab2fb21298a586f2bf77b452069c6f81da4ed10c213"
+      },
+      "existing_evidence": [
+        {
+          "path": "serena-qualification/chain-inclusion-proof.json",
+          "sha256": "4e6958b028c8eec33e967ddc269fb18f443d2541b09e080a6e6f073adfcc17a1",
+          "json_pointer": "/chain/2"
+        },
+        {
+          "path": "serena-qualification/candidate-pr-637/candidate-manifest.json",
+          "sha256": "5c6a6021f6e63f2516a049611600383e7c4bcd7aa60ae75463ab6c1597d6de2a"
+        },
+        {
+          "path": "serena-qualification/retarget-637-comparison.json",
+          "sha256": "8913b807361924fbe84d1b334268ab919c05d6598862dfcd7254e0a14dd96cef"
+        }
+      ],
+      "history": "Existing complete ancestor commit and exact changed file bytes remain; one-parent target append preserves that ancestry. Retarget target PR from #636 to #635 only after parent fixes are preserved.",
+      "publication_readback": "PENDING_ROOT_PUBLICATION_BASE_CHANGE_AND_READBACK",
+      "closure": "NOT_PERFORMED"
+    }
+  ],
+  "original_descriptions": {
+    "path": "docs/original-pr-descriptions.manifest.json",
+    "sha256": "30fe3be8cf37e2ec4a8d546ea56a550a52263088a818334349045d97dcf4b512"
+  },
+  "runtime": "NOT_RUN_BY_THIS_PROOF",
+  "post_publication_required": [
+    "Read target PR actual head, tree and one-parent relation back.",
+    "Match published target tree to the candidate tree above; recheck all retained tests/content if head changes.",
+    "For #637, confirm actual base is #635 and original #636 ancestry remains.",
+    "Retain source branches/commits and archived descriptions; close donors without merging only after readback."
+  ]
+}

@@ -1,0 +1,187 @@
+{
+  "verified_at_utc": "2026-11-19T14:24:02.743853+00:00",
+  "verification": "recomputed from retained private bytes; no new scheduler or process calls",
+  "verifier_sha256": "4b17dfacd357c6a8e4db4c834f280c2a9091d5e1f3605ae47804b0107bdc2ba9",
+  "retained_runs": [
+    {
+      "label": "known-task-query",
+      "receipt_sha256": "85ede3469a5b34315737371ed069a6c8c1847723d959574e5c0976ee7cffe03e",
+      "receipt_bytes": 5686,
+      "runner_sha256": "1f9cb276c26e7d11697259fc56d0b96c729eaee30f36c1d474f63a08f1795845",
+      "commands": [
+        {
+          "label": "com-before",
+          "started_utc": "2026-11-19T12:02:02.146833+00:00",
+          "finished_utc": "2026-11-19T12:02:02.432001+00:00",
+          "seconds": 0.285,
+          "returncode": 0,
+          "process_outcome": "completed",
+          "stdout": {
+            "bytes": 3861,
+            "sha256": "d3b3c3b76b9229766f0583a0a922b4b736f850f60027f107ec7bdfa42fc61884"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "label": "schtasks-query-hresult",
+          "started_utc": "2026-11-19T12:02:02.434618+00:00",
+          "finished_utc": "2026-11-19T12:02:02.467320+00:00",
+          "seconds": 0.033,
+          "returncode": 0,
+          "process_outcome": "completed",
+          "stdout": {
+            "bytes": 1462,
+            "sha256": "23075b803ca57b520a85e494a7a71fbfa10c87892bdc6cdfe9c5291d047fbc6a"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "label": "com-after",
+          "started_utc": "2026-11-19T12:02:02.472226+00:00",
+          "finished_utc": "2026-11-19T12:02:02.729484+00:00",
+          "seconds": 0.257,
+          "returncode": 0,
+          "process_outcome": "completed",
+          "stdout": {
+            "bytes": 3861,
+            "sha256": "d3b3c3b76b9229766f0583a0a922b4b736f850f60027f107ec7bdfa42fc61884"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      ]
+    },
+    {
+      "label": "cim-query",
+      "receipt_sha256": "5d004f1dc3531c9ef9bf38eda60b6751b8b4849ea5f7d507df65a413aecd2206",
+      "receipt_bytes": 7688,
+      "runner_sha256": "1b61dae22318dc5d27fee58b3efbc80f9584afe4aaa03cb07ffd47f169042258",
+      "commands": [
+        {
+          "label": "com-before",
+          "started_utc": "2026-11-19T12:14:49.068840+00:00",
+          "finished_utc": "2026-11-19T12:14:49.600852+00:00",
+          "seconds": 0.532,
+          "returncode": 0,
+          "process_outcome": "completed",
+          "stdout": {
+            "bytes": 3861,
+            "sha256": "d3b3c3b76b9229766f0583a0a922b4b736f850f60027f107ec7bdfa42fc61884"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "label": "cim-export",
+          "started_utc": "2026-11-19T12:14:49.605701+00:00",
+          "finished_utc": "2026-11-19T12:14:50.539883+00:00",
+          "seconds": 0.934,
+          "returncode": 0,
+          "process_outcome": "completed",
+          "stdout": {
+            "bytes": 9101,
+            "sha256": "2ca545cb4ab1632cf463d91dcd88aa655ac8ca5ec43c1d6b1b55e7ea31a53b58"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "label": "com-after",
+          "started_utc": "2026-11-19T12:14:50.540806+00:00",
+          "finished_utc": "2026-11-19T12:14:50.969154+00:00",
+          "seconds": 0.428,
+          "returncode": 0,
+          "process_outcome": "completed",
+          "stdout": {
+            "bytes": 3861,
+            "sha256": "d3b3c3b76b9229766f0583a0a922b4b736f850f60027f107ec7bdfa42fc61884"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      ]
+    }
+  ],
+  "streams_verified": 12,
+  "windows": {
+    "major": 10,
+    "minor": 0,
+    "build": 22631
+  },
+  "codepages": {
+    "oem_codepage": 866,
+    "ansi_codepage": 1251
+  },
+  "binary_sha256": {
+    "schtasks": "9a4e7e5b7db54128308af8cb5605da371b460d092d49f10a735a2c67372a185a",
+    "powershell": "3247bcfd60f6dd25f34cb74b5889ab10ef1b3ec72b4d4b3d95b5b25b534560b8"
+  },
+  "module_versions": [
+    {
+      "name": "ScheduledTasks",
+      "version": "1.0.0.0"
+    }
+  ],
+  "module_source_sha256": {
+    "MSFT_ScheduledTask.format.ps1xml": "d9ebfa9a210f3b00f65161593c956764a89841a3ccee18ba3c155a7dd1c81cb2",
+    "MSFT_ScheduledTask.types.ps1xml": "9c78ec8fbcfa79f569e94f1c9c3c26f07dc848ffe338c17fad42129854d42883",
+    "MSFT_ScheduledTask_v1.0.cdxml": "692e53a278ccae9fcbc9449f68dabdf62cc69f2fec3295e2b37e1fef472efc69",
+    "PS_ClusteredScheduledTask_v1.0.cdxml": "71bf9ab1b5fd88586638e640fe90237a511ebc8e5ca4552950201b686ff17c5b",
+    "PS_ScheduledTask.types.ps1xml": "3497ae4ac5e29c7db92e8bd6fbc0ac1e507be3f78da0e6f464b5b4347f00e76d",
+    "PS_ScheduledTask_v1.0.cdxml": "fc7f13065f81d1141240d6e2f195ffb7ebffee4ebcdab06f057d8b25f78d86d2",
+    "ScheduledTasks.psd1": "b6d96d460353b9968ed4aa01ff4b445d3ca8d8691fd0436138e79b62e19b94c1"
+  },
+  "direct": {
+    "before_after_and_later_com_equal": true,
+    "com_utf8_bytes": 1427,
+    "com_utf8_sha256": "cc89e966659d61a42883c2f8038f6065f59c9a8438ff12ac7e87058e94493e94",
+    "query_bytes": 1462,
+    "query_sha256": "23075b803ca57b520a85e494a7a71fbfa10c87892bdc6cdfe9c5291d047fbc6a",
+    "exact_transformation": {
+      "U+00A7_to_U+0015": 1,
+      "CRLF_to_CRCRLF": 36
+    },
+    "com_xml_well_formed": true,
+    "query_xml_well_formed": false,
+    "query_parse_error": {
+      "code": 4,
+      "position": [
+        11,
+        64
+      ]
+    }
+  },
+  "cim": {
+    "exact_matches_four_com_snapshots": true,
+    "exact_bytes": 1427,
+    "exact_sha256": "cc89e966659d61a42883c2f8038f6065f59c9a8438ff12ac7e87058e94493e94",
+    "case_bytes": 1427,
+    "case_sha256": "c4c256a52872691ee0311254ba22a8451d2223554a98f1f139e091e4508fdfe5",
+    "case_xml_well_formed": true,
+    "case_request_changes_only_uri": true,
+    "negative_error_code": "0x80070002",
+    "semantic_absence_established": false
+  },
+  "not_qualified": [
+    "hidden task",
+    "access denied",
+    "service unavailable",
+    "full Unicode alphabet",
+    "production replacement",
+    "atomic task snapshot"
+  ]
+}

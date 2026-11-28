@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "initial_guard": "ROOT_[A-Z_]+",
+  "result": "rejected legitimate historical identifiers, before any GitHub body update",
+  "correction": "Check only the two exact unresolved placeholder strings",
+  "matches": [
+    {
+      "file": "pr-631.md",
+      "legitimate_existing_tokens": [
+        "ROOT_KNOWN"
+      ]
+    }
+  ]
+}

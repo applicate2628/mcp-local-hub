@@ -1,0 +1,17 @@
+{
+  "label": "candidate-run",
+  "binary_sha256": "7909a802fa287d3460127ed328c6f22a50cf2552af0acd9a81f6e61a7a3e8182",
+  "args": [
+    "-test.v",
+    "-test.run=^(TestRenderLinuxUnit_PreservesLiteralPercent|TestLinuxBackend_PercentPathRoundTripAndLegacyDrift)$",
+    "-test.count=2",
+    "-test.timeout=30s"
+  ],
+  "platform": "Linux-6.18.57-x86_64-with-glibc2.41",
+  "started_utc": "2026-11-21T09:03:33.106779+00:00",
+  "direct_timeout_seconds": 45,
+  "source_commit": "ba17867125b3728fb734e90b383639a3ff9175ee",
+  "format": "Go verbose test protocol; no package JSON events",
+  "native_service_operations": false,
+  "race_detector": false
+}

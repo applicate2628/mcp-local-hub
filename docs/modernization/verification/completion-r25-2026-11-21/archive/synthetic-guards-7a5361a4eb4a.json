@@ -1,0 +1,69 @@
+{
+  "schema": "r25-synthetic-archive-guard-checks-v1",
+  "state": "PASS",
+  "synthetic_only": true,
+  "product_or_native_execution": false,
+  "packager_executed": false,
+  "cases": [
+    {
+      "case": "count3_counter_and_valid_zip",
+      "state": "PASS"
+    },
+    {
+      "case": "collapsed_count3_rejected",
+      "state": "PASS",
+      "observed_rejection": "Planned terminal events differ"
+    },
+    {
+      "case": "compile_failure_preserved_without_test_events",
+      "state": "PASS"
+    },
+    {
+      "case": "compile_with_test_activity_rejected",
+      "state": "PASS",
+      "observed_rejection": "Failure is not compilation before tests"
+    },
+    {
+      "case": "tampered_stdout_rejected",
+      "state": "PASS",
+      "observed_rejection": "Pinned digest differs: evidence/synthetic-guards-qualify/synthetic-command.stdout.log"
+    },
+    {
+      "case": "extra_capture_rejected",
+      "state": "PASS",
+      "observed_rejection": "Unaccounted or missing phase capture"
+    },
+    {
+      "case": "missing_stream_rejected",
+      "state": "PASS",
+      "observed_rejection": "Missing pinned member: evidence/synthetic-guards-qualify/synthetic-command.stderr.log"
+    },
+    {
+      "case": "manifest_pin_rejected",
+      "state": "PASS",
+      "observed_rejection": "Pinned digest differs: scopes/synthetic-guards/manifest.json"
+    },
+    {
+      "case": "source_preimage_rejected",
+      "state": "PASS",
+      "observed_rejection": "Pinned Git blob differs: originals/source-pr0/internal/cli/synthetic_guard_test.go"
+    },
+    {
+      "case": "overlay_target_rejected",
+      "state": "PASS",
+      "observed_rejection": "Overlay paths differ"
+    },
+    {
+      "case": "external_index_pin_rejected",
+      "state": "PASS",
+      "observed_rejection": "Pinned digest differs: archive-index.json"
+    },
+    {
+      "case": "duplicate_zip_member_rejected",
+      "state": "PASS",
+      "observed_rejection": "Duplicate or excessive ZIP members"
+    }
+  ],
+  "verifier_sha256": "7a5361a4eb4a1b802d91d8bfd8276e91487650b650ca5d8d005498852116a539",
+  "test_source_sha256": "a40c25d63d1c0f81b0b053e9aeb8d936178bd0b9d0c1b311975738b7fba934d3"
+}

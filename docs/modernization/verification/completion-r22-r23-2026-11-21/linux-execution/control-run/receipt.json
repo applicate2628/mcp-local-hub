@@ -1,0 +1,88 @@
+{
+  "label": "control-run",
+  "binary_sha256": "34304a1abcc27a252c266e09122a2c5646da517c9814a132dcf07635767d6471",
+  "args": [
+    "-test.v",
+    "-test.run=^(TestRenderLinuxUnit_PreservesLiteralPercent|TestLinuxBackend_PercentPathRoundTripAndLegacyDrift)$",
+    "-test.count=1",
+    "-test.timeout=30s"
+  ],
+  "platform": "Linux-6.18.57-x86_64-with-glibc2.41",
+  "started_utc": "2026-11-21T09:03:33.082923+00:00",
+  "direct_timeout_seconds": 45,
+  "source_commit": "ba17867125b3728fb734e90b383639a3ff9175ee",
+  "format": "Go verbose test protocol; no package JSON events",
+  "native_service_operations": false,
+  "race_detector": false,
+  "pid": 6,
+  "exit_code": 1,
+  "settled": true,
+  "seconds": 0.016565144003834575,
+  "stdout": {
+    "bytes": 4100,
+    "sha256": "f391469e14b77e92fecc92498d0dc782c9e028dde9dcc9ce8e3a17b64eebe533"
+  },
+  "stderr": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "test_events": [
+    {
+      "action": "FAIL",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent"
+    },
+    {
+      "action": "PASS",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent/plain-normal"
+    },
+    {
+      "action": "PASS",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent/plain-strict"
+    },
+    {
+      "action": "FAIL",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent/single-normal"
+    },
+    {
+      "action": "FAIL",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent/single-strict"
+    },
+    {
+      "action": "FAIL",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent/specifier-normal"
+    },
+    {
+      "action": "FAIL",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent/specifier-strict"
+    },
+    {
+      "action": "FAIL",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent/unknown-normal"
+    },
+    {
+      "action": "FAIL",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent/unknown-strict"
+    },
+    {
+      "action": "FAIL",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent/double-normal"
+    },
+    {
+      "action": "FAIL",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent/double-strict"
+    },
+    {
+      "action": "FAIL",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent/mixed-normal"
+    },
+    {
+      "action": "FAIL",
+      "name": "TestRenderLinuxUnit_PreservesLiteralPercent/mixed-strict"
+    },
+    {
+      "action": "FAIL",
+      "name": "TestLinuxBackend_PercentPathRoundTripAndLegacyDrift"
+    }
+  ],
+  "oracle_matched": true
+}

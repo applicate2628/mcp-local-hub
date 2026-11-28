@@ -1,0 +1,478 @@
+{
+  "schema": "r25-validation-oracle-evidence-v1",
+  "created_utc": "2026-11-21T13:01:20.324355+00:00",
+  "decision": "Retain api.WriteStateFileAtomic; accept only stronger domain-error assertions. Direct seeding is an unaccepted performance experiment.",
+  "performance_claim": false,
+  "observed_slowdown_cause_established": false,
+  "source": {
+    "base_commit": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+    "base_tree": "bda8789467feb6795d2ab341479a32b27e8cb489",
+    "target": "internal/cli/install_reconcile_mcp_front_v3_test.go",
+    "original": {
+      "path": "r25-audit/go-budget/source/internal/cli/install_reconcile_mcp_front_v3_test.go",
+      "bytes": 112426,
+      "sha256": "0c02d2d971651ed037bfa8e184da26fa6e94849b9bcb1090b5ea0277eeeb2f47"
+    },
+    "candidate": {
+      "path": "r25-audit/go-budget/oracle-candidate/internal/cli/install_reconcile_mcp_front_v3_test.go",
+      "bytes": 113546,
+      "sha256": "91a326178b2e2f30be40b181dd4853cafe3c1ee3a0b56fb7406441d7c9619ba4"
+    },
+    "candidate_git_blob": "4768fce28e27a73baf5fc9973b015fc706fbfb6c",
+    "patch": {
+      "path": "r25-audit/go-budget/validation-oracle.patch",
+      "bytes": 6808,
+      "sha256": "f68c48ba32349ac84e48539f6521d23e31514e27e70534fcbc7745857b6fd5ac"
+    },
+    "patch_added": 35,
+    "patch_removed": 20,
+    "scope_manifest": {
+      "path": "r25-audit/runtime/payload/scopes/invalid-oracle/manifest.json",
+      "bytes": 10222,
+      "sha256": "cd167a9cda767b2e57e64d29f689a12819d86ca34052ea89e91cbc3078f17dd9"
+    },
+    "wrapper": {
+      "path": "r25-audit/runtime/qualify_scope.py",
+      "bytes": 13541,
+      "sha256": "610269f4e6841d336c4339abafe94751db8386d49c3fa4a2ce3bb103a794984e"
+    }
+  },
+  "static_review": {
+    "patch_roundtrip_exact": true,
+    "bytes_outside_existing_test_function_unchanged": true,
+    "all_34_names_order_classes_preparations_mutations_preserved": true,
+    "invalid_cases": 30,
+    "other_cases": 4,
+    "durable_write_retained": true,
+    "shared_real_journal_setup_unchanged": true,
+    "both_reader_and_rollback_domain_assertions": true,
+    "zero_pin_reader_calls_assertion_retained": true,
+    "new_imports": false,
+    "new_production_hooks": false,
+    "production_changes": false,
+    "default_error": "has an invalid authority shape",
+    "default_error_case_count": 20,
+    "explicit_error_overrides": {
+      "applied-without-pin-is-invalid": "has mismatched pin binding",
+      "retained-no-receipt-without-pin-is-invalid": "has mismatched pin binding",
+      "surface-is-invalid": "carries a serena pin binding",
+      "client-is-invalid": "does not match its exact identity",
+      "language-is-invalid": "does not match its exact identity",
+      "row-identity-is-invalid": "does not match its exact identity",
+      "active-plan-generation-is-invalid": "active plan generation 2 does not match artifact generation 1",
+      "report-generation-is-invalid": "active plan generation 1 does not match artifact generation 2",
+      "active-plan-row-key-is-invalid": "active generation operation references unplanned row \"other\"",
+      "active-plan-operation-is-invalid": "serena operation \"remove\" is not supported"
+    },
+    "issue": "Before: err != nil could accept a read-admission or decoding error without proving semantic validation. Source-level false-PASS possibility; not an observed false-PASS in these logs.",
+    "limitation": "The relevant production errors have no domain sentinel/type. Existing, specific message fragments are used, so intentional domain-message changes require test maintenance."
+  },
+  "master_vs_direct_seed_observations": [
+    {
+      "variant": "before",
+      "stdout": {
+        "path": "r25-audit/runtime/invalid-fixtures-before.stdout.jsonl",
+        "bytes": 110360,
+        "sha256": "b982f1b7d0188b43a1dea132d96358d6b0e73fc4890044e3e78396cdf778747f"
+      },
+      "receipt": {
+        "path": "r25-audit/runtime/invalid-fixtures-before-receipt-readback.json",
+        "bytes": 67287,
+        "sha256": "f7f12f080b1a16ce0eca1be2ca783782d7a2be48944417f1c39eda08cd74bc0d"
+      },
+      "receipt_encoding": "local JSON reserialization; not original remote receipt bytes",
+      "stdout_hash_matches_runner_receipt": true,
+      "action_counts": {
+        "start": 1,
+        "run": 105,
+        "output": 212,
+        "pass": 106
+      },
+      "test_pass_count": 105,
+      "package_pass_count": 1,
+      "fail_count": 0,
+      "skip_count": 0,
+      "root_elapsed_seconds": [
+        1.99,
+        2.21,
+        1.66
+      ],
+      "root_elapsed_median_seconds": 1.99,
+      "root_elapsed_range_seconds": [
+        1.66,
+        2.21
+      ],
+      "package_elapsed_seconds": 5.918,
+      "external_seconds": 44.240707400022075,
+      "command_args": [
+        "test",
+        "-overlay",
+        "D:\\dev\\ChatGPT\\mcp-r25-focused-20261121\\evidence\\invalid-fixtures-before\\overlay.json",
+        "-json",
+        "-count=3",
+        "-p=1",
+        "-timeout=5m",
+        "-run",
+        "^TestMCPFrontV3_SerenaConflictClassifierMutationTable$",
+        "./internal/cli"
+      ],
+      "stdout_contains_fallback_marker": false,
+      "stderr_bytes": 0
+    },
+    {
+      "variant": "candidate",
+      "stdout": {
+        "path": "r25-audit/runtime/invalid-fixtures-candidate.stdout.jsonl",
+        "bytes": 110303,
+        "sha256": "2796e2f327893d2eb55c8846394fe25390c79369ce6b351de4c48b0c3f945b1f"
+      },
+      "receipt": {
+        "path": "r25-audit/runtime/invalid-fixtures-candidate-receipt-readback.json",
+        "bytes": 67413,
+        "sha256": "21e735d8a2abd42919727dcab98ce20bdfdf1550713ef6f98fffc6d85f688415"
+      },
+      "receipt_encoding": "local JSON reserialization; not original remote receipt bytes",
+      "stdout_hash_matches_runner_receipt": true,
+      "action_counts": {
+        "start": 1,
+        "run": 105,
+        "output": 212,
+        "pass": 106
+      },
+      "test_pass_count": 105,
+      "package_pass_count": 1,
+      "fail_count": 0,
+      "skip_count": 0,
+      "root_elapsed_seconds": [
+        6.63,
+        3.24,
+        2.89
+      ],
+      "root_elapsed_median_seconds": 3.24,
+      "root_elapsed_range_seconds": [
+        2.89,
+        6.63
+      ],
+      "package_elapsed_seconds": 12.79,
+      "external_seconds": 28.557695099967532,
+      "command_args": [
+        "test",
+        "-overlay",
+        "D:\\dev\\ChatGPT\\mcp-r25-focused-20261121\\evidence\\invalid-fixtures-candidate\\overlay.json",
+        "-json",
+        "-count=3",
+        "-p=1",
+        "-timeout=5m",
+        "-run",
+        "^TestMCPFrontV3_SerenaConflictClassifierMutationTable$",
+        "./internal/cli"
+      ],
+      "stdout_contains_fallback_marker": false,
+      "stderr_bytes": 0
+    }
+  ],
+  "final_candidate_qualification": {
+    "qualify": {
+      "receipt": {
+        "path": "r25-audit/runtime/invalid-oracle-qualify-receipt-readback.json",
+        "bytes": 85512,
+        "sha256": "3e2626d84f746c2011b59d2918f62a7588b714d812e4791c79f79a677f7a926d"
+      },
+      "receipt_encoding": "local JSON reserialization; not original remote receipt bytes",
+      "scope_manifest_verified": true,
+      "source_snapshots_verified": true,
+      "command_oracles_verified": true,
+      "commands": [
+        {
+          "label": "validation-default",
+          "args": [
+            "test",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-r25-focused-20261121\\evidence\\invalid-oracle-qualify\\overlay.json",
+            "-race",
+            "-json",
+            "-count=1",
+            "-p=1",
+            "-timeout=5m",
+            "-run",
+            "^TestMCPFrontV3_SerenaConflictClassifierMutationTable$",
+            "./internal/cli"
+          ],
+          "seconds": 56.84597959998064,
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "stdout": {
+            "bytes": 37076,
+            "sha256": "ad9ab7622541babb80dd5b060df8114ab7e39eee332b23d042f0123376a59d70",
+            "captured_utc": "2026-11-21T12:54:24.174042+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T12:54:24.174225+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "scope_oracle_matched": true,
+          "test_pass_count": 35,
+          "package_pass_count": 1,
+          "fail_count": 0,
+          "skip_count": 0,
+          "pass_names": [
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/fresh-authority-free-pinless",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/retained-pinned-no-receipt",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/retained-prior-applied",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/applied-without-pin-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/retained-no-receipt-without-pin-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/prior-applied-receipt-removed-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/prior-applied-current-generation-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/prior-applied-post-state-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/nil-disposition-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/empty-disposition-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/baseline-only-disposition-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/restored-disposition-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/failed-disposition-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/unknown-disposition-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/wrong-conflict-reason-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/wrong-pending-reason-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/dependency-identity-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/surface-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/client-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/language-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/row-identity-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/baseline-marker-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/fresh-baseline-state-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-generation-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-operation-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-pre-state-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-intended-state-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-generation-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/report-generation-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-row-key-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-operation-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-pre-state-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-intended-state-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/not-precondition-conflict",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable",
+            "PACKAGE:mcp-local-hub/internal/cli"
+          ]
+        },
+        {
+          "label": "validation-state-tag",
+          "args": [
+            "test",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-r25-focused-20261121\\evidence\\invalid-oracle-qualify\\overlay.json",
+            "-race",
+            "-json",
+            "-count=1",
+            "-p=1",
+            "-timeout=5m",
+            "-tags=test_state_path_env",
+            "-run",
+            "^TestMCPFrontV3_SerenaConflictClassifierMutationTable$",
+            "./internal/cli"
+          ],
+          "seconds": 32.90045950002968,
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "stdout": {
+            "bytes": 37108,
+            "sha256": "48fde2b7c2a99a1bccbaf54be950eb3f99c5a159271197b740b95a14dcece9b7",
+            "captured_utc": "2026-11-21T12:54:57.892595+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T12:54:57.893475+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "scope_oracle_matched": true,
+          "test_pass_count": 35,
+          "package_pass_count": 1,
+          "fail_count": 0,
+          "skip_count": 0,
+          "pass_names": [
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/fresh-authority-free-pinless",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/retained-pinned-no-receipt",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/retained-prior-applied",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/applied-without-pin-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/retained-no-receipt-without-pin-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/prior-applied-receipt-removed-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/prior-applied-current-generation-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/prior-applied-post-state-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/nil-disposition-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/empty-disposition-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/baseline-only-disposition-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/restored-disposition-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/failed-disposition-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/unknown-disposition-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/wrong-conflict-reason-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/wrong-pending-reason-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/dependency-identity-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/surface-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/client-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/language-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/row-identity-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/baseline-marker-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/fresh-baseline-state-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-generation-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-operation-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-pre-state-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-intended-state-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-generation-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/report-generation-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-row-key-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-operation-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-pre-state-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-intended-state-is-invalid",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable/not-precondition-conflict",
+            "TestMCPFrontV3_SerenaConflictClassifierMutationTable",
+            "PACKAGE:mcp-local-hub/internal/cli"
+          ]
+        }
+      ],
+      "process_tree_settlement_observed": false,
+      "whole_process_tree_deadline_enforced": false,
+      "stdout_independently_reparsed_locally": false
+    },
+    "build-vet": {
+      "receipt": {
+        "path": "r25-audit/runtime/invalid-oracle-build-vet-receipt-readback.json",
+        "bytes": 78198,
+        "sha256": "c8e85aa2ca77eec83a71dd7a3311235c5c718a2edf1c373662e26744305a2dde"
+      },
+      "receipt_encoding": "local JSON reserialization; not original remote receipt bytes",
+      "scope_manifest_verified": true,
+      "source_snapshots_verified": true,
+      "command_oracles_verified": true,
+      "commands": [
+        {
+          "label": "build-all",
+          "args": [
+            "build",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-r25-focused-20261121\\evidence\\invalid-oracle-build-vet\\overlay.json",
+            "./..."
+          ],
+          "seconds": 8.060212999931537,
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T12:56:59.100068+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T12:56:59.100166+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "scope_oracle_matched": true
+        },
+        {
+          "label": "vet-all",
+          "args": [
+            "vet",
+            "-overlay",
+            "D:\\dev\\ChatGPT\\mcp-r25-focused-20261121\\evidence\\invalid-oracle-build-vet\\overlay.json",
+            "./..."
+          ],
+          "seconds": 9.01399810006842,
+          "exit_code": 0,
+          "settled": true,
+          "timed_out": false,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T12:57:08.635799+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "captured_utc": "2026-11-21T12:57:08.635912+00:00",
+            "hash_scope": "bytes observed after direct-child exit"
+          },
+          "scope_oracle_matched": true
+        }
+      ],
+      "process_tree_settlement_observed": false,
+      "whole_process_tree_deadline_enforced": false,
+      "stdout_independently_reparsed_locally": false
+    }
+  },
+  "source_proof": [
+    {
+      "path": "r25-audit/go-budget/source/internal/cli/install_reconcile_mcp_front.go",
+      "bytes": 163756,
+      "sha256": "c4e46f4cea7f73561360220cbcacd6d11a0b2fc5efba7f8c1ad3d2370c63a768",
+      "base_git_blob": "e0025585721cdaf6c01bbcf387e451f4c5eca3f1",
+      "matches_exact_master": true
+    },
+    {
+      "path": "r25-audit/go-budget/source/internal/api/state_file_helper.go",
+      "bytes": 14317,
+      "sha256": "218df6c12d8b69bbaca960c6ad7a124a1018206b9160a625e4fa14cc44ee2d65",
+      "base_git_blob": "b47ce874f4e106c6874945bbad87dab45cfc4133",
+      "matches_exact_master": true
+    },
+    {
+      "path": "r25-audit/go-budget/source/internal/api/apitest/hardened_tempdir_windows.go",
+      "bytes": 3931,
+      "sha256": "7b16b12ac4218e010eb39bf717500ca4bc8995055f6970a6b6c845243c78e826",
+      "base_git_blob": "f34520a757580def4e14cfd461e8674c42a19a14",
+      "matches_exact_master": true
+    },
+    {
+      "path": "r25-audit/go-budget/seeding-source/internal/api/state_read_inode_anchor.go",
+      "bytes": 6475,
+      "sha256": "87511f3b83bb4d0371bbf6664a8da315eb5d7cb3b4b4386c3e61a8272b4005d2",
+      "base_git_blob": "7dc7150e046ce2faf69afea5c063fbbbd3870ec3",
+      "matches_exact_master": true
+    },
+    {
+      "path": "r25-audit/go-budget/seeding-source/internal/api/hub_mcp_state_read_inode_windows.go",
+      "bytes": 16950,
+      "sha256": "57d97fc082a20efce4bcc30b8cdcde0d0460502bcf2f5393a12266ee6791ff4d",
+      "base_git_blob": "5b8e75060ca88ccba974b0b5f831472627db19be",
+      "matches_exact_master": true
+    },
+    {
+      "path": "r25-audit/go-budget/seeding-source/internal/api/hub_mcp_log.go",
+      "bytes": 12621,
+      "sha256": "cf52ccb1e47990af267487ecd19e04b7d43d2ab4696ba1e51ede71985584b921",
+      "base_git_blob": "78dde2115e323881de2db0f5ea7dfc54870607f9",
+      "matches_exact_master": true
+    },
+    {
+      "path": "r25-audit/go-budget/seeding-source/internal/api/hub_mcp_log_observation.go",
+      "bytes": 16476,
+      "sha256": "406e13b7201445441adc36062ef61e6879734e75d5ed1d30a641599411152dd6",
+      "base_git_blob": "873c7dca2c99f5a82ed6062bbe44efdd5d9c27a1",
+      "matches_exact_master": true
+    }
+  ],
+  "unconfirmed_mechanism": {
+    "mechanism": "A direct-created Windows leaf may have read-broadened DACL; admitted default-relax fallback invokes LogHubMcpEvent, whose append path calls f.Sync. Two reads per invalid case could incur additional audit I/O if that fallback occurred.",
+    "observed_branch_execution": false,
+    "missing_evidence": [
+      "Actual per-file DACL/selected fallback branch",
+      "Retained hub-mcp.log events or phase timing for that branch"
+    ],
+    "stdout_absence_does_not_disprove_file_logging": true,
+    "reason_for_no_causal_claim": "The timing logs and receipts do not show whether the fallback branch executed; no branch-attributed timing was captured."
+  },
+  "untested_scope": [
+    "full Go test suite",
+    "historical full Go failures/budgets",
+    "general production latency or timeout improvement"
+  ],
+  "new_go_native_remote_execution_by_reducer": false
+}

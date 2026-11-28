@@ -1,0 +1,102 @@
+{
+  "schema": 1,
+  "verified_at_utc": "2026-11-20T21:57:51.656414+00:00",
+  "archive_sha256": "17ddbab64bca03b3f167bf293b2c402c33654440d8ee1c94134c1627626c4961",
+  "entries": 129,
+  "manifest_files": 128,
+  "crc_verified": true,
+  "command_streams": 52,
+  "original_streams_directly_rehashable": 51,
+  "redacted_streams_original_hashes_from_verified_remote_inputs": [
+    "evidence/control/clone.stderr.log"
+  ],
+  "runs": [
+    {
+      "phase": "control",
+      "label": "original-snapshot-control",
+      "seconds": 228.14654029998928,
+      "counts": {
+        "pass": {
+          "test": 0,
+          "package": 0
+        },
+        "fail": {
+          "test": 15,
+          "package": 1
+        },
+        "skip": {
+          "test": 0,
+          "package": 0
+        }
+      }
+    },
+    {
+      "phase": "candidate",
+      "label": "snapshot-contract-race",
+      "seconds": 52.912820899975486,
+      "counts": {
+        "pass": {
+          "test": 30,
+          "package": 1
+        },
+        "fail": {
+          "test": 0,
+          "package": 0
+        },
+        "skip": {
+          "test": 0,
+          "package": 0
+        }
+      }
+    },
+    {
+      "phase": "adjacent",
+      "label": "pass-a-pass-b-race",
+      "seconds": 6.587194300023839,
+      "counts": {
+        "pass": {
+          "test": 8,
+          "package": 1
+        },
+        "fail": {
+          "test": 0,
+          "package": 0
+        },
+        "skip": {
+          "test": 0,
+          "package": 0
+        }
+      }
+    },
+    {
+      "phase": "published",
+      "label": "snapshot-contract-race",
+      "seconds": 7.02984769991599,
+      "counts": {
+        "pass": {
+          "test": 30,
+          "package": 1
+        },
+        "fail": {
+          "test": 0,
+          "package": 0
+        },
+        "skip": {
+          "test": 0,
+          "package": 0
+        }
+      }
+    }
+  ],
+  "control_final_event": {
+    "Time": "2026-11-21T00:42:33.1938714+03:00",
+    "Action": "fail",
+    "Package": "mcp-local-hub/internal/api",
+    "Elapsed": 0.036
+  },
+  "control_finished_utc": "2026-11-20T21:45:49.506383+00:00",
+  "seconds_after_final_event": 196.312512,
+  "process_observation_utc": "2026-11-20T21:45:07.350897+00:00",
+  "observer_contains_runner_sha256": false,
+  "whole_tree_settlement_proved": false
+}

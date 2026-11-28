@@ -1,0 +1,76 @@
+{
+  "ref": "1ebe00c5dbac448488d980072e689b1126875dde",
+  "scope": "selected source files only, not full-tree qualification",
+  "files": {
+    "CLAUDE.md": {
+      "bytes": 115701,
+      "sha256": "6f712b0cb664cd144b39129e7313233dd1c4a51deda31a5f10bd5a639d0389df",
+      "blob": "2bafe12915c29b935c6e9280c9a23817ba753286"
+    },
+    "docs/testing/serena-qualification.md": {
+      "bytes": 2221,
+      "sha256": "53fc95561438d08195a67051a0e7c9a5ae59e51dcfe4eed3fe1fda6eed612f8b",
+      "blob": "a054240430cb414d9e85c6133f76264bd9db4c77"
+    },
+    "internal/api/serena_build_environment_source.go": {
+      "bytes": 7911,
+      "sha256": "3b0ae76a7ff209c8bd5325d7d003e7f400ebfb9db7d509c0af1f77a9bef8172a",
+      "blob": "dac996afbb422ec9d97eff7cc9710853c314a39f"
+    },
+    "internal/api/serena_preparation_policy.go": {
+      "bytes": 8112,
+      "sha256": "e095ca53412c08ec49249abaa1c522b51e79e8057be4a9ab96235386ad03d0dc",
+      "blob": "0c24f69be5a2e80ffb5f2c10643c138b6e5e4222"
+    },
+    "internal/api/serena_qualification_namespace_windows.go": {
+      "bytes": 11387,
+      "sha256": "98ecf83d554fb6cef973ed6a26c4dbf46ec9a6ef399e2f70c98582a52a759ff3",
+      "blob": "cf4e435ed736f962f7dd6ce9151f0e3a099c5cb8"
+    },
+    "internal/cli/migrate_serena.go": {
+      "bytes": 106148,
+      "sha256": "7d538d0e04ff27ebef203b0b8d48a6e7a9d7c18c5f3ca0aa835f7bb04bb1b617",
+      "blob": "cdc126cf94d2d44ac9455c55c4375ccfa7eb6d98"
+    },
+    "internal/cli/migrate_serena_prepared_fixture_path_windows_test.go": {
+      "bytes": 1230,
+      "sha256": "28dba494ff6a78624a6de676ebc9e6b832702409568b3b2b9c070eadb79b5ee4",
+      "blob": "37b6ca42b6249df8ede7b3205387d02f9e653a1d"
+    },
+    "internal/cli/migrate_serena_prepared_fixture_test.go": {
+      "bytes": 3475,
+      "sha256": "3861a02bb475fcf28260b3e2ef06fb533eb07b481f1a6227361f7ee2f9ab9d21",
+      "blob": "0f97f2873061ba3e0c10d5593c263395a4dffd64"
+    },
+    "internal/cli/migrate_serena_prepared_fixture_unsupported_test.go": {
+      "bytes": 673,
+      "sha256": "62dbc48b952b247fa6026cb635e6682bc6b204fe5749a735a150fde81ac25dd3",
+      "blob": "c279ef6fda464dbf6da507edd37ea1b8e0cac520"
+    },
+    "internal/cli/migrate_serena_prepared_fixture_windows_test.go": {
+      "bytes": 4225,
+      "sha256": "22c796096a030b380fb653101c1afd58d44fde7a59c9cbe7d06ac3e855b4f5a2",
+      "blob": "3e237867631c263cc168b859d56241c8625dad40"
+    },
+    "internal/cli/migrate_serena_test.go": {
+      "bytes": 190235,
+      "sha256": "a0f7faacb947169f92858d5a47f54f00b13a5c5fb622fdcbc927dc97385d70b8",
+      "blob": "d4e651fd3e5351fc0013bf2fb5c254d5ae33e250"
+    },
+    "internal/cli/serena_preparation_assembly.go": {
+      "bytes": 3138,
+      "sha256": "0b693b011453fcf70e1958c449066ab4b703ce723945054cad408cf2761c5697",
+      "blob": "fe9f3ca04ce27596b3eae44fd6d82330daa8eb66"
+    },
+    "internal/cli/settings_registry_test.go": {
+      "bytes": 27802,
+      "sha256": "23679e76e5bb36a9ce380bee8ad13cec4f1080cc05a59d0ebe13cbcc5991e3af",
+      "blob": "f9ad6ea44bfb6a2f2d3d674beba1215208a00261"
+    },
+    "tools/test-serena-publisher/README.md": {
+      "bytes": 3780,
+      "sha256": "e143f102b5a024c34919284c11481edada12cdb1a6b80c7e042d5a74b134e5ff",
+      "blob": "9e78975985b785f449c1f6df1c3566c4a42d13ad"
+    }
+  }
+}

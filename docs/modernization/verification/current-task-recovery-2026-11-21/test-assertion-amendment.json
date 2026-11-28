@@ -1,0 +1,13 @@
+{
+  "reason": "Windows %q diagnostics escape backslashes; test assertions now use strconv.Quote(path)",
+  "product_changes": false,
+  "changed_files": [
+    "internal/api/install_task_recovery_test.go"
+  ],
+  "initial_error_output_count": 12,
+  "initial_pass_events": 26,
+  "initial_fail_events": 17,
+  "old_manifest_sha256": "058dc4461898c2b6301b372cf630778e3e57fa63dddd125f2f801b271a7da95b",
+  "new_manifest_sha256": "f3e12a0bed9f4024e4e00734eb35da859c23defc86c8b0963ac9469d80890534",
+  "retained_directory": "<RECOVERY_ROOT>\\diagnostics\\initial"
+}

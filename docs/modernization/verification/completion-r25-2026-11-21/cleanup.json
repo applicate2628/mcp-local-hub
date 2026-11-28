@@ -1,0 +1,129 @@
+{
+  "schema": 1,
+  "scope": "Only redundant copies created in this continuation",
+  "records": [
+    {
+      "schema": 1,
+      "started_utc": "2026-11-21T14:41:42.665955+00:00",
+      "action": "same-volume rename directly to trash; no deletion or emptying",
+      "state": "COMPLETE",
+      "moves": [
+        {
+          "source": "D:\\dev\\ChatGPT\\mcp-reader-native-read-20261121-ef942c6e\\archive-inputs",
+          "destination": "D:\\dev\\ChatGPT\\trash\\reader-native-read-20261121-ef942c6e\\0-mcp-reader-native-read-20261121-ef942c6e-archive-inputs",
+          "verified": true,
+          "files": 13,
+          "bytes": 3598476,
+          "root_identity": [
+            15424946169900087391,
+            844424937114002
+          ],
+          "same_all_identities_contents_sizes_attributes_links_mtimes": true,
+          "source_absent": true,
+          "inventory_sha256": "fc5fd85fa2582891fab4b69cf69f8ed15f940fb0e3e81fd4fd69af1f195f376f"
+        },
+        {
+          "source": "D:\\dev\\ChatGPT\\mcp-reader-native-read-20261121-ef942c6e\\vendor",
+          "destination": "D:\\dev\\ChatGPT\\trash\\reader-native-read-20261121-ef942c6e\\1-mcp-reader-native-read-20261121-ef942c6e-vendor",
+          "verified": true,
+          "files": 810,
+          "bytes": 24435145,
+          "root_identity": [
+            15424946169900087391,
+            844424937114003
+          ],
+          "same_all_identities_contents_sizes_attributes_links_mtimes": true,
+          "source_absent": true,
+          "inventory_sha256": "01146765c150d0002c63050d73e616b2b839479d17f3b1934fec190a6079f4dc"
+        },
+        {
+          "source": "D:\\dev\\ChatGPT\\mcp-reader-native-read-20261121-ef942c6e\\payload.json",
+          "destination": "D:\\dev\\ChatGPT\\trash\\reader-native-read-20261121-ef942c6e\\2-mcp-reader-native-read-20261121-ef942c6e-payload.json",
+          "verified": true,
+          "files": 1,
+          "bytes": 60208,
+          "root_identity": [
+            15424946169900087391,
+            844424937113979
+          ],
+          "same_all_identities_contents_sizes_attributes_links_mtimes": true,
+          "source_absent": true,
+          "inventory_sha256": "14ac406cc2b813c3f4a8fac8f6369e16d5f6d5ce02e832864bc556eafc6f424a"
+        },
+        {
+          "source": "D:\\dev\\ChatGPT\\mcp-reader-native-read-20261121-ef942c6e-v2\\archive-inputs",
+          "destination": "D:\\dev\\ChatGPT\\trash\\reader-native-read-20261121-ef942c6e\\3-mcp-reader-native-read-20261121-ef942c6e-v2-archive-inputs",
+          "verified": true,
+          "files": 13,
+          "bytes": 3598476,
+          "root_identity": [
+            15424946169900087391,
+            844424937115448
+          ],
+          "same_all_identities_contents_sizes_attributes_links_mtimes": true,
+          "source_absent": true,
+          "inventory_sha256": "bf47d65a2984a40310fa4c7c4fafb8d888e22a39438fd7ec3a487d0844729210"
+        },
+        {
+          "source": "D:\\dev\\ChatGPT\\mcp-reader-native-read-20261121-ef942c6e-v2\\vendor",
+          "destination": "D:\\dev\\ChatGPT\\trash\\reader-native-read-20261121-ef942c6e\\4-mcp-reader-native-read-20261121-ef942c6e-v2-vendor",
+          "verified": true,
+          "files": 810,
+          "bytes": 24435145,
+          "root_identity": [
+            15424946169900087391,
+            844424937115449
+          ],
+          "same_all_identities_contents_sizes_attributes_links_mtimes": true,
+          "source_absent": true,
+          "inventory_sha256": "a1b4d10b7745f74d00bfe34295112a0d5b74a605ecbef741881eec12f7832169"
+        },
+        {
+          "source": "D:\\dev\\ChatGPT\\mcp-reader-native-read-20261121-ef942c6e-v2\\payload.json",
+          "destination": "D:\\dev\\ChatGPT\\trash\\reader-native-read-20261121-ef942c6e\\5-mcp-reader-native-read-20261121-ef942c6e-v2-payload.json",
+          "verified": true,
+          "files": 1,
+          "bytes": 60337,
+          "root_identity": [
+            15424946169900087391,
+            844424937115408
+          ],
+          "same_all_identities_contents_sizes_attributes_links_mtimes": true,
+          "source_absent": true,
+          "inventory_sha256": "7e2193c8c0327bc7046ebc392da26129df96c77fc988810a4c646d0583addb13"
+        }
+      ],
+      "preserved": "Original qualified inputs, source exports, drivers, manifests, logs, receipts, test executables/runtime/fixtures and recovery remain outside trash.",
+      "process_claim": "All recorded commands finished and session listing was empty before cleanup; this is not whole-process-tree settlement qualification.",
+      "finished_utc": "2026-11-21T14:41:43.281045+00:00"
+    },
+    {
+      "schema": 1,
+      "started_utc": "2026-11-21T14:42:07.602575+00:00",
+      "action": "same-volume rename directly to trash; no deletion or emptying",
+      "state": "COMPLETE",
+      "moves": [
+        {
+          "source": "D:\\dev\\ChatGPT\\mcp-r25-finalize-20261121-ef942c6e\\readback",
+          "destination": "D:\\dev\\ChatGPT\\trash\\r25-readback-20261121-ef942c6e\\0-mcp-r25-finalize-20261121-ef942c6e-readback",
+          "verified": true,
+          "files": 70,
+          "bytes": 4457363,
+          "root_identity": [
+            11865562527820811924,
+            1688849864696297
+          ],
+          "same_all_identities_contents_sizes_attributes_links_mtimes": true,
+          "source_absent": true,
+          "inventory_sha256": "e31f15febea091b8a2059b6ad9444643c1a2f19e9fc3d8eb8e49dd8a64d70256"
+        }
+      ],
+      "preserved": "Original qualified inputs, source exports, drivers, manifests, logs, receipts, test executables/runtime/fixtures and recovery remain outside trash.",
+      "process_claim": "All recorded commands finished and session listing was empty before cleanup; this is not whole-process-tree settlement qualification.",
+      "finished_utc": "2026-11-21T14:42:07.659042+00:00"
+    }
+  ],
+  "total_moves": 7,
+  "total_files": 1718,
+  "total_bytes": 60645150
+}

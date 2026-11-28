@@ -1,0 +1,131 @@
+{
+  "ref": "2d12d9b63e60387591d27515aef3487c0e3ea560",
+  "scope": "selected source files only, not full-tree qualification",
+  "files": {
+    "AGENTS.md": {
+      "bytes": 8220,
+      "sha256": "94a3124e31c8b51e884a02bbdcffb010ec0c5ba19f29009da2c761a1d0bad135",
+      "blob": "cc889dd7c9679985fab7ae55d82d76597bbebcdc"
+    },
+    "docs/agent-runbook.md": {
+      "bytes": 121009,
+      "sha256": "5d6be718c54bd3436ca8b37ae8a6e42d071f24f2c7961a4adcfe25843491a518",
+      "blob": "1e7e066e99e021a93af80ddb2401ad0399b3df15"
+    },
+    "go.mod": {
+      "bytes": 1045,
+      "sha256": "805a7dd76431a24ebd6ce346682e7bc321e4dae0e37488448811bfa624122edd",
+      "blob": "b9b488ddf9ed0f2ac78e8bdcab90f77a57f2b7d3"
+    },
+    "internal/api/api.go": {
+      "bytes": 6178,
+      "sha256": "69d481efbd45306ab91541d9361e91efbcb8063be10fdb808e3a5e845e5e0606",
+      "blob": "938adb8bce844805a0c431ef88e0195c9e454b38"
+    },
+    "internal/api/apitest/hardened_tempdir_windows.go": {
+      "bytes": 3931,
+      "sha256": "7b16b12ac4218e010eb39bf717500ca4bc8995055f6970a6b6c845243c78e826",
+      "blob": "f34520a757580def4e14cfd461e8674c42a19a14"
+    },
+    "internal/api/apitest/testmain_cleanup.go": {
+      "bytes": 1393,
+      "sha256": "ead170c2f4bb3e92940406b78162d97ed2306b99de191da40b874528afadbf81",
+      "blob": "b788b6e5e07c8cfac0f726da9b7ce190c9c0ce1b"
+    },
+    "internal/api/main_test.go": {
+      "bytes": 15816,
+      "sha256": "a34d3b8e14f610945662a7aeee122068641b931af19ffd9535ba6e24b186d869",
+      "blob": "0aebe605b377efd27cbcf8b57d4c417b151ce298"
+    },
+    "internal/api/secure_write_client_config.go": {
+      "bytes": 8845,
+      "sha256": "3d651cdae77b4127e24464ea4dcc2f08a0f054ef4ae37c00028b5e36e46340bd",
+      "blob": "131fbd4c3e0b77f58f8e0b1f6bd629f702e5fdea"
+    },
+    "internal/api/secure_write_windows.go": {
+      "bytes": 48385,
+      "sha256": "47a7c68fc714644115eecc72f19a06f47339daa2e276dc404a59c77a05fa0352",
+      "blob": "9459cd42d6389b28c14dfd86727eef493f6aa69f"
+    },
+    "internal/api/serena_build_environment.go": {
+      "bytes": 12968,
+      "sha256": "0cf235923e319246e1fe3403da5803b06bd020bdb089f8740fedcacda26e465f",
+      "blob": "35af40886d457d10e7de63edec99b11262a0006c"
+    },
+    "internal/api/serena_build_environment_source.go": {
+      "bytes": 7911,
+      "sha256": "3b0ae76a7ff209c8bd5325d7d003e7f400ebfb9db7d509c0af1f77a9bef8172a",
+      "blob": "dac996afbb422ec9d97eff7cc9710853c314a39f"
+    },
+    "internal/api/serena_parsed_preparation.go": {
+      "bytes": 7669,
+      "sha256": "f59a56c710b524d5cf7b74bc97085fde8e42d63d2ecad81e54472199f3c8bc38",
+      "blob": "7b6d33b2ed30ffbe1b4736a9d0947fb8f02d7f0b"
+    },
+    "internal/api/serena_preparation_assembly.go": {
+      "bytes": 4884,
+      "sha256": "e9f60280d65246df9a37508e0856e8afbc043d6d61c63a2a21f0ba2294acadd5",
+      "blob": "740539f6d7c5912751c03ee82f48c44ec6d8efa4"
+    },
+    "internal/api/serena_preparation_context_test.go": {
+      "bytes": 19118,
+      "sha256": "b8eaeb61868501740d1a85a95d94d9ba82d0d32d082e93427633bea994416c28",
+      "blob": "d74e7baf631a5232c2f750b9262ee578a1129747"
+    },
+    "internal/api/serena_prepared_install_effects.go": {
+      "bytes": 7500,
+      "sha256": "070ab4ca4bbf5081134a0e7e7e87928492483d611eeaf770c0ae0639a2c1fccb",
+      "blob": "1cb841f32af85f0367fd7ae5f6b6c3e3500baec0"
+    },
+    "internal/api/state_file_helper.go": {
+      "bytes": 14317,
+      "sha256": "218df6c12d8b69bbaca960c6ad7a124a1018206b9160a625e4fa14cc44ee2d65",
+      "blob": "b47ce874f4e106c6874945bbad87dab45cfc4133"
+    },
+    "internal/buildinfo/buildinfo.go": {
+      "bytes": 3260,
+      "sha256": "3a7359f68a3fb922f7f72be763b9be853ca501ff807a029e2acd8ef1bbb2456e",
+      "blob": "40a2b4ee14d43952fb6a53bcf49174c754cde832"
+    },
+    "internal/cli/client_config_env_isolation_test.go": {
+      "bytes": 3258,
+      "sha256": "7ca8d6679efaaf8a6c8d6cc73b8365cc4d2dcf996c3cf0375b0e46fa0ca8879f",
+      "blob": "2facb92643f9453e455fc71d08e7b97856ea2f89"
+    },
+    "internal/cli/install_reconcile_mcp_front.go": {
+      "bytes": 163756,
+      "sha256": "c4e46f4cea7f73561360220cbcacd6d11a0b2fc5efba7f8c1ad3d2370c63a768",
+      "blob": "e0025585721cdaf6c01bbcf387e451f4c5eca3f1"
+    },
+    "internal/cli/install_reconcile_mcp_front_pr588_test.go": {
+      "bytes": 24799,
+      "sha256": "7a86363b5812192823517aedc45dd22730b91f7d7c407496f0c7c18effcc5565",
+      "blob": "789b4eaffdaa6fc4e61d0deedfb3b3145d7fb062"
+    },
+    "internal/cli/install_reconcile_mcp_front_v3_test.go": {
+      "bytes": 112426,
+      "sha256": "0c02d2d971651ed037bfa8e184da26fa6e94849b9bcb1090b5ea0277eeeb2f47",
+      "blob": "8cd1aabdaa136403d37352361092fe612fc14844"
+    },
+    "internal/cli/migrate_serena.go": {
+      "bytes": 106148,
+      "sha256": "7d538d0e04ff27ebef203b0b8d48a6e7a9d7c18c5f3ca0aa835f7bb04bb1b617",
+      "blob": "cdc126cf94d2d44ac9455c55c4375ccfa7eb6d98"
+    },
+    "internal/cli/migrate_serena_test.go": {
+      "bytes": 189792,
+      "sha256": "2d209f5feee08a50ec4389c95306b0299c62a08adf1695bf17397d54d6468774",
+      "blob": "d4f46b748bdd3c6cb2a865e2c4327dd9c60ba463"
+    },
+    "internal/cli/settings_registry_test.go": {
+      "bytes": 27802,
+      "sha256": "23679e76e5bb36a9ce380bee8ad13cec4f1080cc05a59d0ebe13cbcc5991e3af",
+      "blob": "f9ad6ea44bfb6a2f2d3d674beba1215208a00261"
+    },
+    "tools/testshards/main.go": {
+      "bytes": 14020,
+      "sha256": "7d74038c23ec4974ed8cfaa3f14a1155514e37d5ce08d7ef519d285b17a95c22",
+      "blob": "a0c3b0bc5456ac84c8f6bc01c0f324cf215c9ca9"
+    }
+  }
+}

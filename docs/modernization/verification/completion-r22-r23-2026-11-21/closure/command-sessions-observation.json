@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "started_utc": "2026-11-21 10:07:55 UTC",
+  "ended_utc": "2026-11-21 10:07:58 UTC",
+  "command_sessions_observation": "No active sessions",
+  "whole_process_tree_settlement_proven": false,
+  "scope": "Remote Desktop Commander command sessions; does not enumerate all native descendants."
+}

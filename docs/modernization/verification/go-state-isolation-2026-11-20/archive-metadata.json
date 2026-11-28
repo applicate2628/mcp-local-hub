@@ -1,0 +1,20 @@
+{
+  "base": "92f2d4350bfc22a5fa8099fd1b4ec199f9a19c22",
+  "head": "2cb467aac31259ed4fb665ed0a4f277a8f9c31a2",
+  "candidate_tree": "75e9b00a936a639172d08e4ccf1fde947d6899dd",
+  "archive_file": "evidence-redacted.zip",
+  "archive_sha256": "8d2b1958302cefe559953df2aacd7cef105a93f74428e2884224f87a9b994908",
+  "archive_bytes": 264612,
+  "archive_members": 75,
+  "manifest_files": 74,
+  "manifest_sha256": "a1db2fdd8955a240d6a86b1ca87e05854bb6c7e625cc9092604667ab60331bc8",
+  "summary_sha256": "f9dd89a74cc1b29126b8d9cabe32179e9edb737d39b8edd8273c84d4622c18a1",
+  "base64_file": "evidence-redacted.base64.txt",
+  "base64_sha256": "b21262cedde660e07b5bbd187e9168e9b42c1c832092a8021079ade719d1431d",
+  "base64_bytes": 352903,
+  "base64_lines": 87,
+  "base64_chunk_characters": 4096,
+  "credential_shape_scan": "PASS",
+  "all_mandatory_commands_passed": false,
+  "scoped_absence_observed": true
+}

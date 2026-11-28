@@ -1,0 +1,24 @@
+{
+  "archive_sha256": "d12ca2b81b815d18e4a49c659516e8f29c05709542aefb86919b9b5101b178ab",
+  "archive_bytes": 298833,
+  "members": 274,
+  "manifest_entries": 271,
+  "raw_sources_hashed": 337,
+  "transferred_base64_exact": true,
+  "every_member_sha256_and_size_verified": true,
+  "raw_and_public_manifest_bindings_verified": true,
+  "public_contents_bounded_scan_passed": true,
+  "private_binaries_acl_and_protocol_logs_excluded": true,
+  "full_gate_exit_codes": [
+    0,
+    0,
+    1,
+    1
+  ],
+  "published_test_pass_events": 6,
+  "published_package_pass_events": 2,
+  "process_observation_scope": "owned-root marker only; whole process tree not proven",
+  "github_readback_included": false,
+  "github_readback_record": "Final PR Conversation comment after publication",
+  "verifier_sha256": "467e3b3455919d51c56106298236bb09a48d5278e56400b678213c4886cf775a"
+}

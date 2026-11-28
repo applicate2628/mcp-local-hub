@@ -1,0 +1,740 @@
+{
+  "schema": "mcphub-publication-readback-v1",
+  "observed_at_utc": "2026-11-21T18:31:01Z",
+  "display_timezone": "Europe/Moscow",
+  "repository": "applicate2628/mcp-local-hub",
+  "scope": "Readback after updating all 27 PR descriptions, before publishing this receipt. The receipt's own single-parent documentation successor of PR #623 is outside these captured head values; its publication does not alter the audited source contracts. The #623 header is updated to that successor and read back after publication.",
+  "master": "75dbc6406123e22468f168b861d5e0622c9d5769",
+  "open_pr_count": 27,
+  "all_open_prs_draft": true,
+  "branch_count": 114,
+  "unchanged_branch_heads_since_audit": 110,
+  "all_branch_names_preserved": true,
+  "github_ownership": {
+    "authors": [
+      "applicate2628"
+    ],
+    "assignees": 0,
+    "requested_reviewers": 0,
+    "codeowners_in_audited_master": false
+  },
+  "published_documentation": {
+    "master": "75dbc6406123e22468f168b861d5e0622c9d5769",
+    "reader": {
+      "sha": "6615d239fe066eaa5fa78c22a5272d6602528274",
+      "tree": "b45e9e6b5e61231584c2fe9919a80cdb72e01259",
+      "blob": "10827fb11d6c122a949c55812a0b356ef120d7a3",
+      "readback": true
+    },
+    "ffi": {
+      "sha": "701535e3439d74495080463976d610a42303e5cf",
+      "tree": "2f0179bff4ce877afe1bae76275010877161283e"
+    },
+    "report": {
+      "sha": "cc7b33a9e69028165cbab7042c536f846e6f901f",
+      "tree": "0058928b6e056b5973c3750ae702079fbda6ebc9",
+      "parent": "cd1bb62f1999a501318523b84124213c799e2bdd"
+    },
+    "plan": {
+      "sha": "4c262ba522a2fbe8e040e4bb270f2b47bd579345",
+      "tree": "bed0635b343f3f7b8ce6f1b340287c722f7eebd5",
+      "parent": "9b792480d99f5723a5a9f11d27359c91a425ef26",
+      "blob": "760ce27a47989017fd2134b87ab64c3736fb7764"
+    }
+  },
+  "published_file_blob_readback": [
+    {
+      "path": "docs/modernization/verification/pr-state-audit-2026-11-21/README.md",
+      "blob": "4318f3d8bb36f5e13e2127984dac77d69cae75b4",
+      "readback": true
+    },
+    {
+      "path": "docs/modernization/verification/pr-state-audit-2026-11-21/audit.json",
+      "blob": "8d0dc88e3847165b8518e1c98c67b0e3cfd28a92",
+      "readback": true
+    },
+    {
+      "path": "docs/modernization/verification/pr-state-audit-2026-11-21/branches.json",
+      "blob": "6c8ccd132c39a585bd4098bb523255f953c613a0",
+      "readback": true
+    },
+    {
+      "path": "docs/modernization/plans/rust-independent-execution-plan-2026-11-12.md",
+      "blob": "8519e57dc87275b3aad9b7c957469cf7ac2a0c98",
+      "readback": true
+    }
+  ],
+  "plan_file_readback": {
+    "sha": "760ce27a47989017fd2134b87ab64c3736fb7764",
+    "readback": true
+  },
+  "documentation_scope_checks": [
+    {
+      "number": 623,
+      "head": "cc7b33a9e69028165cbab7042c536f846e6f901f",
+      "parent": "cd1bb62f1999a501318523b84124213c799e2bdd",
+      "commits": 1,
+      "paths": [
+        "docs/modernization/plans/rust-independent-execution-plan-2026-11-12.md",
+        "docs/modernization/verification/pr-state-audit-2026-11-21/README.md",
+        "docs/modernization/verification/pr-state-audit-2026-11-21/audit.json",
+        "docs/modernization/verification/pr-state-audit-2026-11-21/branches.json"
+      ],
+      "additions": 12481,
+      "deletions": 4
+    },
+    {
+      "number": 658,
+      "head": "4c262ba522a2fbe8e040e4bb270f2b47bd579345",
+      "parent": "9b792480d99f5723a5a9f11d27359c91a425ef26",
+      "commits": 1,
+      "paths": [
+        ".plans/2026-11/open-pr-integration-20261117.md"
+      ],
+      "additions": 57,
+      "deletions": 47
+    }
+  ],
+  "pr_description_readback": [
+    {
+      "number": 623,
+      "head": "cc7b33a9e69028165cbab7042c536f846e6f901f",
+      "base": "master",
+      "updated_at": "2026-11-21T18:29:15Z",
+      "body_readback_exact": true,
+      "state": "open",
+      "draft": true,
+      "mergeable": true,
+      "mergeable_state": "clean",
+      "description_sha256": "acf4e34d3698d4401a2ab493075bb67b1c7217512392dac42efd84f3fbc4680f",
+      "previous_description_sha256": "ff221355b53d4c6734a7bcbcb0b7ebbc866e429c179cb2366363bda65e146a7d",
+      "previous_description_preserved": true
+    },
+    {
+      "number": 624,
+      "head": "81dcf67db013ba2879878c2ee6fe07aa0bb4aec3",
+      "base": "master",
+      "updated_at": "2026-11-21T18:29:19Z",
+      "body_readback_exact": true,
+      "state": "open",
+      "draft": true,
+      "mergeable": true,
+      "mergeable_state": "clean",
+      "description_sha256": "83e716533b3f149edc367cf2fca3e9b2f480a3a9a4290396aaef493c2cc7bb45",
+      "previous_description_sha256": "e32a4ba0b5ade7c1e9a458cd8f7a728dea6dde0f9704099d35a6f54ee02f7772",
+      "previous_description_preserved": true
+    },
+    {
+      "number": 625,
+      "head": "287a7772a4be75ed9fb2f9ba1feb68cf035ed907",
+      "base": "master",
+      "updated_at": "2026-11-21T18:29:21Z",
+      "body_readback_exact": true,
+      "state": "open",
+      "draft": true,
+      "mergeable": true,
+      "mergeable_state": "clean",
+      "description_sha256": "d1c57604fc5aced7ac6fba257040a0895a303a7c35924ba8b93e5c49f9f0463f",
+      "previous_description_sha256": "c1fadc602a1dbcf3f480611b65d754bc5ca770a8899918bdbc1b4f68e2535755",
+      "previous_description_preserved": true
+    },
+    {
+      "number": 626,
+      "head": "04e1e19650318725850225ebadc521cbf97dadd9",
+      "base": "master",
+      "updated_at": "2026-11-21T18:29:23Z",
+      "body_readback_exact": true,
+      "state": "open",
+      "draft": true,
+      "mergeable": true,
+      "mergeable_state": "clean",
+      "description_sha256": "26e0c7533ce6e8f8d03a412d026d497516d88283d39d757c48ffe80e9316220a",
+      "previous_description_sha256": "d39a1d2ebb29c1f982a6fc032001e24672b2feaf9a67da2092d1f8f69487bdb9",
+      "previous_description_preserved": true
+    },
+    {
+      "number": 627,
+      "head": "6615d239fe066eaa5fa78c22a5272d6602528274",
+      "base": "master",
+      "updated_at": "2026-11-21T18:29:25Z",
+      "body_readback_exact": true,
+      "state": "open",
+      "draft": true,
+      "mergeable": true,
+      "mergeable_state": "clean",
+      "description_sha256": "00059815e54b4828523b7e5e07e87602fb6112193b1d7075c1aa0c2e0578fcc1",
+      "previous_description_sha256": "6b3568a40ec8761d9145bac026cef6dbb0c1cdbf3fe71e48c2eaec4eb9bc0e13",
+      "previous_description_preserved": true
+    },
+    {
+      "number": 628,
+      "head": "00f120a533f0e0e4bc7b6a56871528ff6dd9fde4",
+      "base": "master",
+      "updated_at": "2026-11-21T18:29:27Z",
+      "body_readback_exact": true,
+      "state": "open",
+      "draft": true,
+      "mergeable": true,
+      "mergeable_state": "clean",
+      "description_sha256": "751669022ed38a624a7d79d19003ba57052679bd40e1a3cb571e9a916b236355",
+      "previous_description_sha256": "363c0882401a53b686406858de384a75c71e4139a6fffe2ef6120793931ddf5a",
+      "previous_description_preserved": true
+    },
+    {
+      "number": 629,
+      "head": "b3646f19706d795a8b0c0dafb2193d7dc6f4c584",
+      "base": "master",
+      "updated_at": "2026-11-21T18:29:30Z",
+      "body_readback_exact": true,
+      "state": "open",
+      "draft": true,
+      "mergeable": true,
+      "mergeable_state": "clean",
+      "description_sha256": "427a73debd289686657bbe0797e2a92fd982ebb99bde6d7d706301b3cdaf8164",
+      "previous_description_sha256": "cdfc652c15123f1d11e2cccc3551766f3853249e3230185d6ca0a660a12242b9",
+      "previous_description_preserved": true
+    },
+    {
+      "number": 631,
+      "head": "701535e3439d74495080463976d610a42303e5cf",
+      "base": "spike/rx02-native-identity-20261114",
+      "updated_at": "2026-11-21T18:29:32Z",
+      "body_readback_exact": true,
+      "state": "open",
+      "draft": true,
+      "mergeable": null,
+      "mergeable_state": "unknown",
+      "description_sha256": "048dd3a38820c10dbef0caf51105a49084ede02ab93d53104232f08d72645e69",
+      "previous_description_sha256": "3652d8980d7e14b61d044c36c8868a6f21d98fd55176b963ecf0f3286fd3d4db",
+      "previous_description_preserved": true
+    },
+    {
+      "number": 632,
+      "head": "ff4ba7f85fef35e19b39dced17d9df47bb9237a0",
+      "base": "master",
+      "updated_at": "2026-11-21T18:29:34Z",
+      "body_readback_exact": true,
+      "state": "open",
+      "draft": true,
+      "mergeable": true,
+      "mergeable_state": "clean",
+      "description_sha256": "7310959ecc465fe3bce90226f8f30ec4a8263d4cea7f0e9ee4b9d7e9cd63ad2c",
+      "previous_description_sha256": "1fbc02c8ac7c71e0c148bc57f676790b03984e9715665e86bc85f1e12ad9514b",
+      "previous_description_preserved": true
+    },
+    {
+      "number": 635,
+      "head": "f639b97ccc56eb18d314d52951d1b5d167d11e5f",
+      "base": "fix/serena-qualified-uv-path-20261114",
+      "updated_at": "2026-11-21T18:29:36Z",
+      "body_readback_exact": true,
+      "state": "open",
+      "draft": true,
+      "mergeable": true,
+      "mergeable_state": "clean",
+      "description_sha256": "9b17ff4d58883b3a3d97629736aee84a10e3a3279402ab03088583fa07e1e48c",
+      "previous_description_sha256": "04fc45093a0df2e0a5daac2804a1077c3521fce40b9f9732ca85ee54a1619872",
+      "previous_description_preserved": true
+    },
+    {
+      "number": 637,
+      "head": "1ebe00c5dbac448488d980072e689b1126875dde",
+      "base": "fix/serena-qualification-publisher-20261114",
+      "updated_at": "2026-11-21T18:29:38Z",
+      "body_readback_exact": true,
+      "state": "open",
+      "draft": true,
+      "mergeable": true,
+      "mergeable_state": "clean",
+      "description_sha256": "cc61bd0d89e7118e551d796cc8a636049eaed358ab1c5a079e42f2fb896000ca",
+      "previous_description_sha256": "952f771062219ecc2cfa45b2dd3d3c7541f06557d6de22cae62b7bf80bdb08e5",
+      "previous_description_preserved": true
+    },
+    {
+      "number": 643,
+      "head": "44f9a3a9332c716fcd5dba5c7098df5cbf1d3c60",
+      "base": "master",
+      "updated_at": "2026-11-21T18:29:39Z",
+      "body_readback_exact": true,
+      "state": "open",
+      "draft": true,
+      "mergeable": true,
+      "mergeable_state": "clean",
+      "description_sha256": "4d7cd2997b755b196d9cb4a5c28e9a7e6587a1957fe1a0684e7827456775d445",
+      "previous_description_sha256": "fd0a5ad8cc484058a893d43615838880896b1e2f0f5a11144e3f39e7478b5ced",
+      "previous_description_preserved": true
+    },
+    {
+      "number": 644,
+      "head": "1cf5754b81c850a3569be269642b49605895eeb2",
+      "base": "spike/rx02-native-process-owner-20261112",
+      "updated_at": "2026-11-21T18:29:42Z",
+      "body_readback_exact": true,
+      "state": "open",
+      "draft": true,
+      "mergeable": false,
+      "mergeable_state": "dirty",
+      "description_sha256": "ee3f662565467e6750dadb0fa71ca6a124923ad2273f2dc4ff991ecf58f40603",
+      "previous_description_sha256": "647a68d68aece4e6a02597ee554fd23b071364f15536363b5ce9f388a9ad046f",
+      "previous_description_preserved": true
+    },
+    {
+      "number": 646,
+      "head": "1df32782e7ade719e1d7f8c6153b4455a6ea740a",
+      "base": "master",
+      "updated_at": "2026-11-21T18:29:44Z",
+      "body_readback_exact": true,
+      "state": "open",
+      "draft": true,
+      "mergeable": true,
+      "mergeable_state": "clean",
+      "description_sha256": "bf00f8955dc834260c5cc7ef7dd48814de44ed5929e3b2ffa6466f2df6979e5b",
+      "previous_description_sha256": "3e3fcb90322780a0cae360a73c9a2a870f357e2d00cac36ddac96ff3cf945f05",
+      "previous_description_preserved": true
+    },
+    {
+      "number": 647,
+      "head": "dca92972e90c5280e6c217409acfc6fd0dfb38ea",
+      "base": "master",
+      "updated_at": "2026-11-21T18:29:46Z",
+      "body_readback_exact": true,
+      "state": "open",
+      "draft": true,
+      "mergeable": true,
+      "mergeable_state": "clean",
+      "description_sha256": "d932f156744b696c8c83330429554e0672c730dfd3d68459edd6b422a9163469",
+      "previous_description_sha256": "bac6aba5b3a5750c8cea49044e69f641e903494f85114673dbc78495ddc05d82",
+      "previous_description_preserved": true
+    },
+    {
+      "number": 648,
+      "head": "184104c186108b150d1183318c3f6791f2a4ba5f",
+      "base": "master",
+      "updated_at": "2026-11-21T18:29:48Z",
+      "body_readback_exact": true,
+      "state": "open",
+      "draft": true,
+      "mergeable": true,
+      "mergeable_state": "clean",
+      "description_sha256": "54227f0f4d34ac264df853f7797e96647a4aa429cffc2c56f14f721ca3eb3f1e",
+      "previous_description_sha256": "0f70a197ca4e6c4b2177461bd02764fd561a9d9ad003c5d0128a40c2dc205003",
+      "previous_description_preserved": true
+    },
+    {
+      "number": 649,
+      "head": "73caa97a860f1eaec205ec84c1502c47ce05cdc0",
+      "base": "master",
+      "updated_at": "2026-11-21T18:29:50Z",
+      "body_readback_exact": true,
+      "state": "open",
+      "draft": true,
+      "mergeable": true,
+      "mergeable_state": "clean",
+      "description_sha256": "be07898baf4e2e25d98917191dbf0b50f4865b73089735a812687d553c9f201a",
+      "previous_description_sha256": "6465bc52c4bed8e7e383264e680bbe62ba50fd776c7268eb43d63c620cb02779",
+      "previous_description_preserved": true
+    },
+    {
+      "number": 650,
+      "head": "2a273c10f6e5c0651e89860f88ef0b6a0e3748ef",
+      "base": "master",
+      "updated_at": "2026-11-21T18:29:53Z",
+      "body_readback_exact": true,
+      "state": "open",
+      "draft": true,
+      "mergeable": true,
+      "mergeable_state": "clean",
+      "description_sha256": "437dbc3a4735fa5dcc9359c741bba19f2f31557fcb261c4018791472d6584da6",
+      "previous_description_sha256": "f688faf5f3d0b42e038c0f3c426d54349e9b2f5031075f95e47297b8f13e0842",
+      "previous_description_preserved": true
+    },
+    {
+      "number": 652,
+      "head": "b079e4c9503f080d8ab09742270c89a3bf88d7d5",
+      "base": "master",
+      "updated_at": "2026-11-21T18:30:09Z",
+      "body_readback_exact": true,
+      "state": "open",
+      "draft": true,
+      "mergeable": true,
+      "mergeable_state": "clean",
+      "description_sha256": "3365ff3e430ed9119ad6d25dd1be8c7558cd55d9f22ba1e7403377e444ddacf5",
+      "previous_description_sha256": "f9f1f6bda2a9a904a8946b7204760bd9dcc49a63847bfa045da71772fb862749",
+      "previous_description_preserved": true
+    },
+    {
+      "number": 653,
+      "head": "90fd6f69ea4a59856375e29b34cebf4953cb2ff4",
+      "base": "master",
+      "updated_at": "2026-11-21T18:30:11Z",
+      "body_readback_exact": true,
+      "state": "open",
+      "draft": true,
+      "mergeable": true,
+      "mergeable_state": "clean",
+      "description_sha256": "331f0901eda8c670243eec988027088aa04fa1df1f51af7d8cc873ba8f3327d0",
+      "previous_description_sha256": "eee39143efff09dfc682b3b79a7522da5e4060c169e6eac69ebf288f6a46e26a",
+      "previous_description_preserved": true
+    },
+    {
+      "number": 654,
+      "head": "d01fb6e73013d6a47628b1a9cbecd2d5f3b8e32c",
+      "base": "master",
+      "updated_at": "2026-11-21T18:30:13Z",
+      "body_readback_exact": true,
+      "state": "open",
+      "draft": true,
+      "mergeable": true,
+      "mergeable_state": "clean",
+      "description_sha256": "3b7e461a31a8945afc3bd52838904a77b3b367a2870bbba2ee2c00674519ac72",
+      "previous_description_sha256": "caaf15ede9d356f690f49a3a699938ed4c8017b0cfbb5d975986a363bab6e3c4",
+      "previous_description_preserved": true
+    },
+    {
+      "number": 655,
+      "head": "2defe618259f7db4144824d19927b032300d160d",
+      "base": "master",
+      "updated_at": "2026-11-21T18:30:15Z",
+      "body_readback_exact": true,
+      "state": "open",
+      "draft": true,
+      "mergeable": true,
+      "mergeable_state": "clean",
+      "description_sha256": "047af97242b5e7c60393e7ceace7086a02cdb998269a386b342cf91c320f19b0",
+      "previous_description_sha256": "f9aac3227af695fb2834d6e3c51156fe1c9b9907402b33eebccde6c74b21a34d",
+      "previous_description_preserved": true
+    },
+    {
+      "number": 657,
+      "head": "4fa52b60b719664ede441be339e196a8b9766c50",
+      "base": "master",
+      "updated_at": "2026-11-21T18:30:18Z",
+      "body_readback_exact": true,
+      "state": "open",
+      "draft": true,
+      "mergeable": true,
+      "mergeable_state": "clean",
+      "description_sha256": "873cfd0bb2e0ba355b3341d4b7530ca285f3916ca24582358398562994921e4c",
+      "previous_description_sha256": "dfa59a02bf3d21813d47be7efc91d0733181672982a710c4256afd1fb81ef644",
+      "previous_description_preserved": true
+    },
+    {
+      "number": 658,
+      "head": "4c262ba522a2fbe8e040e4bb270f2b47bd579345",
+      "base": "master",
+      "updated_at": "2026-11-21T18:30:20Z",
+      "body_readback_exact": true,
+      "state": "open",
+      "draft": true,
+      "mergeable": true,
+      "mergeable_state": "clean",
+      "description_sha256": "1f28156f3fd659abfb9e4cb3a3359b44581008eb623990cf2746bde66a07e9d9",
+      "previous_description_sha256": "c3f16d70e05ca88d28e0000e9a9b748449c9581786eb545cf236683b465b9b5c",
+      "previous_description_preserved": true
+    },
+    {
+      "number": 659,
+      "head": "a3568dfe3426afaca4176d57a2310097e5214e77",
+      "base": "master",
+      "updated_at": "2026-11-21T18:30:22Z",
+      "body_readback_exact": true,
+      "state": "open",
+      "draft": true,
+      "mergeable": true,
+      "mergeable_state": "clean",
+      "description_sha256": "ad1f9b9c8deeb3fc4faf845202d5934dec950eceec96643e2f344e1cf167ef11",
+      "previous_description_sha256": "27de58ce8c2dbf740ded9e9121dbe0ebb16fa14ad71b522d93555ae7d891c7e0",
+      "previous_description_preserved": true
+    },
+    {
+      "number": 660,
+      "head": "610fb30348c10be7b645b6ce43c862397b190f60",
+      "base": "master",
+      "updated_at": "2026-11-21T18:30:25Z",
+      "body_readback_exact": true,
+      "state": "open",
+      "draft": true,
+      "mergeable": true,
+      "mergeable_state": "clean",
+      "description_sha256": "4fdad0d5f3396f9366c231d66a308eeec649159cf00d6f47c210d3b7220dec81",
+      "previous_description_sha256": "38f26c5612f813aa68aebc490f2cf9eb1b2065f14385a74f74a0fc1dfb397be3",
+      "previous_description_preserved": true
+    },
+    {
+      "number": 661,
+      "head": "23ed6b5c6a942812a72e345c5d886b3310e9017e",
+      "base": "master",
+      "updated_at": "2026-11-21T18:30:26Z",
+      "body_readback_exact": true,
+      "state": "open",
+      "draft": true,
+      "mergeable": true,
+      "mergeable_state": "clean",
+      "description_sha256": "14e6d0634b2a026e40a0f2de655c09345dadb6e8db783463ccbe4b0a34cbbcc2",
+      "previous_description_sha256": "1a006e1405b9d2d4cd64352ce7df4d20c2ecb6bdc30e2e9a26bb61da5485dacc",
+      "previous_description_preserved": true
+    }
+  ],
+  "branch_head_delta": [
+    {
+      "branch": "docs/agents-canonical-plan-20261117",
+      "before": "9b792480d99f5723a5a9f11d27359c91a425ef26",
+      "after": "4c262ba522a2fbe8e040e4bb270f2b47bd579345"
+    },
+    {
+      "branch": "docs/rust-cross-platform-no-com-20261112",
+      "before": "cd1bb62f1999a501318523b84124213c799e2bdd",
+      "after": "cc7b33a9e69028165cbab7042c536f846e6f901f"
+    },
+    {
+      "branch": "spike/rx02-go-rust-boundary-20261113",
+      "before": "412cd353d495a890b47992c0eae672a247862508",
+      "after": "701535e3439d74495080463976d610a42303e5cf"
+    },
+    {
+      "branch": "spike/rx04-anchored-read-20261112",
+      "before": "3d5bcdbffec44efe3ea862815bd58666b7f62c5b",
+      "after": "6615d239fe066eaa5fa78c22a5272d6602528274"
+    }
+  ],
+  "github_checks": [
+    {
+      "number": 661,
+      "sha": "23ed6b5c6a942812a72e345c5d886b3310e9017e",
+      "statuses": 0,
+      "check_runs": 0,
+      "status_combined_state": "pending"
+    },
+    {
+      "number": 660,
+      "sha": "610fb30348c10be7b645b6ce43c862397b190f60",
+      "statuses": 0,
+      "check_runs": 0,
+      "status_combined_state": "pending"
+    },
+    {
+      "number": 659,
+      "sha": "a3568dfe3426afaca4176d57a2310097e5214e77",
+      "statuses": 0,
+      "check_runs": 0,
+      "status_combined_state": "pending"
+    },
+    {
+      "number": 658,
+      "sha": "4c262ba522a2fbe8e040e4bb270f2b47bd579345",
+      "statuses": 0,
+      "check_runs": 0,
+      "status_combined_state": "pending"
+    },
+    {
+      "number": 657,
+      "sha": "4fa52b60b719664ede441be339e196a8b9766c50",
+      "statuses": 0,
+      "check_runs": 0,
+      "status_combined_state": "pending"
+    },
+    {
+      "number": 655,
+      "sha": "2defe618259f7db4144824d19927b032300d160d",
+      "statuses": 0,
+      "check_runs": 0,
+      "status_combined_state": "pending"
+    },
+    {
+      "number": 654,
+      "sha": "d01fb6e73013d6a47628b1a9cbecd2d5f3b8e32c",
+      "statuses": 0,
+      "check_runs": 0,
+      "status_combined_state": "pending"
+    },
+    {
+      "number": 653,
+      "sha": "90fd6f69ea4a59856375e29b34cebf4953cb2ff4",
+      "statuses": 0,
+      "check_runs": 0,
+      "status_combined_state": "pending"
+    },
+    {
+      "number": 652,
+      "sha": "b079e4c9503f080d8ab09742270c89a3bf88d7d5",
+      "statuses": 0,
+      "check_runs": 0,
+      "status_combined_state": "pending"
+    },
+    {
+      "number": 650,
+      "sha": "2a273c10f6e5c0651e89860f88ef0b6a0e3748ef",
+      "statuses": 0,
+      "check_runs": 0,
+      "status_combined_state": "pending"
+    },
+    {
+      "number": 649,
+      "sha": "73caa97a860f1eaec205ec84c1502c47ce05cdc0",
+      "statuses": 0,
+      "check_runs": 0,
+      "status_combined_state": "pending"
+    },
+    {
+      "number": 648,
+      "sha": "184104c186108b150d1183318c3f6791f2a4ba5f",
+      "statuses": 0,
+      "check_runs": 0,
+      "status_combined_state": "pending"
+    },
+    {
+      "number": 647,
+      "sha": "dca92972e90c5280e6c217409acfc6fd0dfb38ea",
+      "statuses": 0,
+      "check_runs": 0,
+      "status_combined_state": "pending"
+    },
+    {
+      "number": 646,
+      "sha": "1df32782e7ade719e1d7f8c6153b4455a6ea740a",
+      "statuses": 0,
+      "check_runs": 0,
+      "status_combined_state": "pending"
+    },
+    {
+      "number": 644,
+      "sha": "1cf5754b81c850a3569be269642b49605895eeb2",
+      "statuses": 0,
+      "check_runs": 0,
+      "status_combined_state": "pending"
+    },
+    {
+      "number": 643,
+      "sha": "44f9a3a9332c716fcd5dba5c7098df5cbf1d3c60",
+      "statuses": 0,
+      "check_runs": 0,
+      "status_combined_state": "pending"
+    },
+    {
+      "number": 637,
+      "sha": "1ebe00c5dbac448488d980072e689b1126875dde",
+      "statuses": 0,
+      "check_runs": 0,
+      "status_combined_state": "pending"
+    },
+    {
+      "number": 635,
+      "sha": "f639b97ccc56eb18d314d52951d1b5d167d11e5f",
+      "statuses": 0,
+      "check_runs": 0,
+      "status_combined_state": "pending"
+    },
+    {
+      "number": 632,
+      "sha": "ff4ba7f85fef35e19b39dced17d9df47bb9237a0",
+      "statuses": 0,
+      "check_runs": 0,
+      "status_combined_state": "pending"
+    },
+    {
+      "number": 631,
+      "sha": "701535e3439d74495080463976d610a42303e5cf",
+      "statuses": 0,
+      "check_runs": 0,
+      "status_combined_state": "pending"
+    },
+    {
+      "number": 629,
+      "sha": "b3646f19706d795a8b0c0dafb2193d7dc6f4c584",
+      "statuses": 0,
+      "check_runs": 0,
+      "status_combined_state": "pending"
+    },
+    {
+      "number": 628,
+      "sha": "00f120a533f0e0e4bc7b6a56871528ff6dd9fde4",
+      "statuses": 0,
+      "check_runs": 0,
+      "status_combined_state": "pending"
+    },
+    {
+      "number": 627,
+      "sha": "6615d239fe066eaa5fa78c22a5272d6602528274",
+      "statuses": 0,
+      "check_runs": 0,
+      "status_combined_state": "pending"
+    },
+    {
+      "number": 626,
+      "sha": "04e1e19650318725850225ebadc521cbf97dadd9",
+      "statuses": 0,
+      "check_runs": 0,
+      "status_combined_state": "pending"
+    },
+    {
+      "number": 625,
+      "sha": "287a7772a4be75ed9fb2f9ba1feb68cf035ed907",
+      "statuses": 0,
+      "check_runs": 0,
+      "status_combined_state": "pending"
+    },
+    {
+      "number": 624,
+      "sha": "81dcf67db013ba2879878c2ee6fe07aa0bb4aec3",
+      "statuses": 0,
+      "check_runs": 0,
+      "status_combined_state": "pending"
+    },
+    {
+      "number": 623,
+      "sha": "cc7b33a9e69028165cbab7042c536f846e6f901f",
+      "statuses": 0,
+      "check_runs": 0,
+      "status_combined_state": "pending"
+    },
+    {
+      "number": "master",
+      "sha": "75dbc6406123e22468f168b861d5e0622c9d5769",
+      "statuses": 0,
+      "check_runs": 0,
+      "status_combined_state": "pending"
+    }
+  ],
+  "code_review_no_findings_current_heads": [
+    646,
+    649,
+    652,
+    653,
+    654,
+    655
+  ],
+  "other_current_head_review_status": "REVIEW_PENDING",
+  "other_current_head_review_count": 21,
+  "mergeability_after_documentary_updates": {
+    "pr631": {
+      "head": "701535e3439d74495080463976d610a42303e5cf",
+      "mergeable": true,
+      "state": "clean"
+    },
+    "pr644": {
+      "head": "1cf5754b81c850a3569be269642b49605895eeb2",
+      "mergeable": false,
+      "state": "dirty"
+    },
+    "limitation": "Mergeability is not test or acceptance evidence."
+  },
+  "validation": {
+    "documentation_structure_and_coverage": "PASS",
+    "source_contract_audit": "STATIC_REVIEW_COMPLETED",
+    "runtime_build_go_rust_native_product": "NOT_RUN",
+    "archcheck": "NOT_RUN",
+    "previous_historical_results_reclassified_as_current_pass": false
+  },
+  "operations": {
+    "new_pull_requests": 0,
+    "closed_pull_requests": 0,
+    "merged_pull_requests": 0,
+    "base_changes": 0,
+    "forced_updates": 0,
+    "deleted_branches": 0,
+    "dependency_installations": 0,
+    "manual_ci_dispatches": 0,
+    "external_review_dispatches": 0,
+    "remote_machine_operations": 0
+  }
+}

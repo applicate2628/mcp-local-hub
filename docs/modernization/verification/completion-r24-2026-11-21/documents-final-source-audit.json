@@ -1,0 +1,18 @@
+{
+  "utc": "2026-11-21T11:33:37.666272+00:00",
+  "plan_original_bytes": 374010,
+  "plan_bytes": 38308,
+  "plan_sha256": "87d46b85442488ecf3ea6400706263a478f13475e14f14341701fb48bcb8468a",
+  "plan_reduction_percent": 89.757,
+  "html_anchors_preserved": 34,
+  "plan_placeholder_count": 0,
+  "board_bytes": 180537,
+  "board_sha256": "c229efe2f08fe01b11c50e0d9b9e51f08ec1164a24bfb8a4dcb5105efe19d62f",
+  "board_protected_rows_unchanged": [
+    1,
+    2,
+    3,
+    5,
+    6
+  ]
+}

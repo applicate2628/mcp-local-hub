@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "kind": "byte_only_packaging_replay",
+  "started_utc": "2026-11-20T23:45:21.335879+00:00",
+  "packer_sha256": "ebb43aca4d8d899572ef3923b994abcf99aac6b23f6319c6f4b7eaa9f50ba5f5",
+  "product_or_native_runs": false,
+  "preceding_attempt": {
+    "terminal_session_pid": 4956,
+    "terminal_output_unavailable": true,
+    "output_directories_observed_absent": true,
+    "python_processes_observed_absent": true,
+    "exit_code_unknown": true
+  },
+  "completed": false,
+  "finished_utc": "2026-11-20T23:45:28.238565+00:00",
+  "error_type": "ValueError",
+  "error": "Initial candidate failed in a different way"
+}

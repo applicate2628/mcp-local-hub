@@ -1,0 +1,1576 @@
+{
+  "schema": 1,
+  "redaction": "Work roots, profile paths, local identities and personal SIDs replaced. source_sha256/bytes describe retained originals (or explicitly marked generated pre-redaction records); saved_sha256/bytes describe public bytes. Redacted scripts are audit records, not executable inputs. MANIFEST.json is hashed by archive-metadata.json outside the ZIP, avoiding self-reference.",
+  "files": [
+    {
+      "path": "publication-input.json",
+      "role": "published identity input",
+      "source_bytes": 1521,
+      "source_sha256": "1cdce41e20019ddcb94fee58fc96abf7b639daf9a1315c6ba0c488af2bb05ad2",
+      "saved_bytes": 1521,
+      "saved_sha256": "1cdce41e20019ddcb94fee58fc96abf7b639daf9a1315c6ba0c488af2bb05ad2",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/scripts/pack_public.py",
+      "role": "packer original",
+      "source_bytes": 36598,
+      "source_sha256": "c098154a81ec19e5e1fffccb4b05378b635c7e90bd53507d3e97eed2f44561ac",
+      "saved_bytes": 36592,
+      "saved_sha256": "59d1b3d8edcdc67cf69295daff21aea94f705b8bb3ae6edda54f6ad623946401",
+      "redacted": true,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/scripts/check_cancellation.baseline.py",
+      "role": "retained runner/preparation version",
+      "source_bytes": 15314,
+      "source_sha256": "fb9cc704e9f0f4a01c338a70e00b03d236de56a7a2fbc7ab62ab6b0b61472fcf",
+      "saved_bytes": 15302,
+      "saved_sha256": "5100b86564b212bc5d4ff3484b328db9d42ba711323a6b041c854619674dd30c",
+      "redacted": true,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/scripts/check_cancellation.control.py",
+      "role": "retained runner/preparation version",
+      "source_bytes": 12258,
+      "source_sha256": "818b4e940a2510fcd5516cd2fbe8992e9ed4b3f7a83883edd3ded1c176753f6e",
+      "saved_bytes": 12246,
+      "saved_sha256": "9505851bdd71d4d07d81730b55f2fee26fffbfebca1a7397c234b0c155e89abb",
+      "redacted": true,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/scripts/check_cancellation.positive.py",
+      "role": "retained runner/preparation version",
+      "source_bytes": 13472,
+      "source_sha256": "bb41ce97ba8626ba77fede81eeb86b4108321fcd8959e3117969cd4948a99584",
+      "saved_bytes": 13460,
+      "saved_sha256": "f7f50c7ce7a418af0f25f8edc50da18c600d24a8881adac0575b0d807498bd2c",
+      "redacted": true,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/scripts/check_cancellation.py",
+      "role": "retained runner/preparation version",
+      "source_bytes": 15299,
+      "source_sha256": "3754e6139e84fcf8b7b3a05af8bb80096cd325da5ba4ef058ad3a3105aadc982",
+      "saved_bytes": 15287,
+      "saved_sha256": "74c6a23415c65ed24fafc5047494848c5439e707ef400d1e6cbc6b1974e9d71d",
+      "redacted": true,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/scripts/checkout_published.py",
+      "role": "retained runner/preparation version",
+      "source_bytes": 5044,
+      "source_sha256": "56b74be6ebb4a18df92b4bda89022f8f318019b062398013f7dd3d5f213ea247",
+      "saved_bytes": 5041,
+      "saved_sha256": "ec43703cd065e934a06dc81e8783c0ea8f1d1b8d46b4e8d836b80d4a8daff423",
+      "redacted": true,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/scripts/scan_source.py",
+      "role": "retained runner/preparation version",
+      "source_bytes": 3181,
+      "source_sha256": "bc0459904c58b13541866f390473a2fac2515b26a5a323d2067201fbc78d2831",
+      "saved_bytes": 3178,
+      "saved_sha256": "a09ec620924fd702e2bbb088a4f5cff128cb8f5f3256d5f736fc256345655b68",
+      "redacted": true,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/inputs/hashes.json",
+      "role": "execution manifest",
+      "source_bytes": 876,
+      "source_sha256": "4e07c72cb30ffcf0bcc0f199248a28a4ab00ca81e4dc2c82caac61ba03a3e146",
+      "saved_bytes": 876,
+      "saved_sha256": "4e07c72cb30ffcf0bcc0f199248a28a4ab00ca81e4dc2c82caac61ba03a3e146",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/inputs/candidate.patch",
+      "role": "retained patch version",
+      "source_bytes": 3496,
+      "source_sha256": "7d050c1cf2787b59b890b7e9f4865a798fd78ff1545461b9b6d71bd3c270d2dc",
+      "saved_bytes": 3496,
+      "saved_sha256": "7d050c1cf2787b59b890b7e9f4865a798fd78ff1545461b9b6d71bd3c270d2dc",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/inputs/negative-control.patch",
+      "role": "retained patch version",
+      "source_bytes": 2631,
+      "source_sha256": "695119ada26e2577602eea327f9dad8393784987cb9155cf02419b2b37e2cae6",
+      "saved_bytes": 2631,
+      "saved_sha256": "695119ada26e2577602eea327f9dad8393784987cb9155cf02419b2b37e2cae6",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/inputs/product.patch",
+      "role": "retained patch version",
+      "source_bytes": 865,
+      "source_sha256": "0bc62272cc9bf969e4d0ced5f5c14924a62720c41c3dc2cf2ea2f08b20fa0706",
+      "saved_bytes": 865,
+      "saved_sha256": "0bc62272cc9bf969e4d0ced5f5c14924a62720c41c3dc2cf2ea2f08b20fa0706",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/control/receipt.json",
+      "role": "original phase receipt",
+      "source_bytes": 7672,
+      "source_sha256": "fb39ed0b4ae64d76b36bfc55eae5a4b5d4608312967e70a0f55a42ef01835a57",
+      "saved_bytes": 7652,
+      "saved_sha256": "769e49d2c105b41c3a37be4aaa203f872c898299cf401e0578dd6d14f70ddfc9",
+      "redacted": true,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/control/clone.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/control/clone.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 154,
+      "source_sha256": "ae499e5b53412b71f7ef61c12bfe0c85b5d8103c5ce2dc214f1515d6a46ebc08",
+      "saved_bytes": 151,
+      "saved_sha256": "37a62cc09583a0da15f127a3d075eed410231a049ddb4955133d3f33c8b3bef5",
+      "redacted": true,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/control/clone.receipt.json",
+      "role": "original per-command receipt",
+      "source_bytes": 757,
+      "source_sha256": "441e79fd508c08e286d2986013953b0a70ac6ae3c21ebcc4b8579ea7ba97ece2",
+      "saved_bytes": 747,
+      "saved_sha256": "9f076e69dd25db4437069a7f309f0837928a6baa5ceaeca92e5f656054f489ba",
+      "redacted": true,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/control/apply-control.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/control/apply-control.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/control/apply-control.receipt.json",
+      "role": "original per-command receipt",
+      "source_bytes": 629,
+      "source_sha256": "1e6b1fd4c4bb979caf89c2dd583293d2547f3c8ab0b20216384f0c3bb8c88b6f",
+      "saved_bytes": 624,
+      "saved_sha256": "2d69bff965f379ea303384e3e30a0cd32d568f777815e02602011fa7f4da4897",
+      "redacted": true,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/control/write-control.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/control/write-control.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/control/write-control.receipt.json",
+      "role": "original per-command receipt",
+      "source_bytes": 614,
+      "source_sha256": "eef873c6f7991b17324fd730993f40b308be7059207365f9a5595ed881136cff",
+      "saved_bytes": 609,
+      "saved_sha256": "48b82e6b210401dc13883735cf9b907684e8f5264196c914ba03b92c125e0d71",
+      "redacted": true,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/control/format-tests.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/control/format-tests.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/control/format-tests.receipt.json",
+      "role": "original per-command receipt",
+      "source_bytes": 589,
+      "source_sha256": "9458ae73d206df2177735092854487e2f291438711bc50f4cc163848b67d99b2",
+      "saved_bytes": 589,
+      "saved_sha256": "9458ae73d206df2177735092854487e2f291438711bc50f4cc163848b67d99b2",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/control/go-version.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 34,
+      "source_sha256": "bd74e61f96314b4c2e72e63319395345bc2817752bbdd3fc177a9edb2eb2ba14",
+      "saved_bytes": 34,
+      "saved_sha256": "bd74e61f96314b4c2e72e63319395345bc2817752bbdd3fc177a9edb2eb2ba14",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/control/go-version.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/control/go-version.receipt.json",
+      "role": "original per-command receipt",
+      "source_bytes": 534,
+      "source_sha256": "05673d96be3b5a822661097f5244d650d91b3665468d38a11e06c87fca677418",
+      "saved_bytes": 534,
+      "saved_sha256": "05673d96be3b5a822661097f5244d650d91b3665468d38a11e06c87fca677418",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/control/original-cancellation-control.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 8489,
+      "source_sha256": "1b4f32cda505b70f3ed12bd9b74d09b6085372d633b7294424079236f844e283",
+      "saved_bytes": 8489,
+      "saved_sha256": "1b4f32cda505b70f3ed12bd9b74d09b6085372d633b7294424079236f844e283",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/control/original-cancellation-control.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/control/original-cancellation-control.receipt.json",
+      "role": "original per-command receipt",
+      "source_bytes": 1303,
+      "source_sha256": "adced321e7a0ccedcd236c71f013e74837ef9a4a632adf5b8b214d6738a6e836",
+      "saved_bytes": 1303,
+      "saved_sha256": "adced321e7a0ccedcd236c71f013e74837ef9a4a632adf5b8b214d6738a6e836",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/control/diff-check.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/control/diff-check.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/control/diff-check.receipt.json",
+      "role": "original per-command receipt",
+      "source_bytes": 546,
+      "source_sha256": "bb02879374755dc9d427c0add228b4ae1e700a476b2ef445bc64b94e908d9209",
+      "saved_bytes": 546,
+      "saved_sha256": "bb02879374755dc9d427c0add228b4ae1e700a476b2ef445bc64b94e908d9209",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/candidate/receipt.json",
+      "role": "original phase receipt",
+      "source_bytes": 4668,
+      "source_sha256": "f555e1f4f9b8c25b8b7804b941eae854b65140df5b9434609659a34fe725134d",
+      "saved_bytes": 4658,
+      "saved_sha256": "59317a6ee966b8d9ce11839e7e8251ac3385e0d8066a746e89dc7b2bb3b93027",
+      "redacted": true,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/candidate/apply-product.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/candidate/apply-product.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/candidate/apply-product.receipt.json",
+      "role": "original per-command receipt",
+      "source_bytes": 621,
+      "source_sha256": "01ffbfbfc53f0e5fff3a856e8d9b01a33f7171cb2ba1afbe60ec802a633c6714",
+      "saved_bytes": 616,
+      "saved_sha256": "419da4173cb0d781c195aaaccce2f824130983ff1bce045435ae390b9d8549b4",
+      "redacted": true,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/candidate/write-product.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/candidate/write-product.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/candidate/write-product.receipt.json",
+      "role": "original per-command receipt",
+      "source_bytes": 606,
+      "source_sha256": "5137063217f53b048f8921d67091c7086b1ad54a737c7c7554b1bab7151c2a8b",
+      "saved_bytes": 601,
+      "saved_sha256": "61fcf7858d6c31a7ef06ccdd1e54c46dd38f6f9ecc3bb77e1f5823150e396506",
+      "redacted": true,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/candidate/format-candidate.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/candidate/format-candidate.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/candidate/format-candidate.receipt.json",
+      "role": "original per-command receipt",
+      "source_bytes": 645,
+      "source_sha256": "7a93117b9eab9f766a77b47704ac50d07c0e127719a2b9d640fe5116241cbad2",
+      "saved_bytes": 645,
+      "saved_sha256": "7a93117b9eab9f766a77b47704ac50d07c0e127719a2b9d640fe5116241cbad2",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/candidate/diff-check.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/candidate/diff-check.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/candidate/diff-check.receipt.json",
+      "role": "original per-command receipt",
+      "source_bytes": 546,
+      "source_sha256": "a3c5e0e109b2a50cc34fe208ea06b7731291ff760a6036727465db5c57c31c1a",
+      "saved_bytes": 546,
+      "saved_sha256": "a3c5e0e109b2a50cc34fe208ea06b7731291ff760a6036727465db5c57c31c1a",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/focused/receipt.json",
+      "role": "original phase receipt",
+      "source_bytes": 5686,
+      "source_sha256": "69df916d49b70f4fb85abd362470e3ff04581835f81e646d1cc5c29f46e50101",
+      "saved_bytes": 5686,
+      "saved_sha256": "69df916d49b70f4fb85abd362470e3ff04581835f81e646d1cc5c29f46e50101",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/focused/scheduler-contract-race.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 27331,
+      "source_sha256": "f05581977d1f2b5252ebf649c8f8888d5983e47b6f57bb25a6b3d91ab4d30290",
+      "saved_bytes": 27331,
+      "saved_sha256": "f05581977d1f2b5252ebf649c8f8888d5983e47b6f57bb25a6b3d91ab4d30290",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/focused/scheduler-contract-race.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/focused/scheduler-contract-race.receipt.json",
+      "role": "original per-command receipt",
+      "source_bytes": 3074,
+      "source_sha256": "204c6171da0ae826dacc4a2314a3e624f8492b0077057f76740052093611b4a3",
+      "saved_bytes": 3074,
+      "saved_sha256": "204c6171da0ae826dacc4a2314a3e624f8492b0077057f76740052093611b4a3",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/focused/diff-check.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/focused/diff-check.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/focused/diff-check.receipt.json",
+      "role": "original per-command receipt",
+      "source_bytes": 546,
+      "source_sha256": "dff2bc60db1c785472f3558adfc8d5071d0872e8d0e717d5c9694f1e4877ae5c",
+      "saved_bytes": 546,
+      "saved_sha256": "dff2bc60db1c785472f3558adfc8d5071d0872e8d0e717d5c9694f1e4877ae5c",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/adjacent/receipt.json",
+      "role": "original phase receipt",
+      "source_bytes": 2539,
+      "source_sha256": "d817f1cc19db3dd863fe69038bad40de1b0a6e0d18359e5fb861148897ab3721",
+      "saved_bytes": 2539,
+      "saved_sha256": "d817f1cc19db3dd863fe69038bad40de1b0a6e0d18359e5fb861148897ab3721",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/adjacent/reconcile-timeout-race.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 4357,
+      "source_sha256": "d2e452e58b4991d19bc52cfb6ffc4efed19d2cb26d5f96af4a40ed8c073a2aad",
+      "saved_bytes": 4357,
+      "saved_sha256": "d2e452e58b4991d19bc52cfb6ffc4efed19d2cb26d5f96af4a40ed8c073a2aad",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/adjacent/reconcile-timeout-race.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/adjacent/reconcile-timeout-race.receipt.json",
+      "role": "original per-command receipt",
+      "source_bytes": 1107,
+      "source_sha256": "a2d00c6ba0dc4d250e986c28b24144e64c06e424d923158fc69151f3c3bfc485",
+      "saved_bytes": 1107,
+      "saved_sha256": "a2d00c6ba0dc4d250e986c28b24144e64c06e424d923158fc69151f3c3bfc485",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/adjacent-baseline/receipt.json",
+      "role": "original phase receipt",
+      "source_bytes": 4451,
+      "source_sha256": "54d56f879fe3e2613ccc6fefb53e0b3bd6cab386015be51c7c0a3de2cbd9d249",
+      "saved_bytes": 4441,
+      "saved_sha256": "0dd489b2805e42e56a13d3bcc2be0495a83b92d39cf1d972573d240c90f4d9bb",
+      "redacted": true,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/adjacent-baseline/clone-baseline.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/adjacent-baseline/clone-baseline.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 156,
+      "source_sha256": "2abdba63477a89e2c5c09b89399e99fa6e4647d5f62a01688d3b835c49b07bdf",
+      "saved_bytes": 153,
+      "saved_sha256": "007496c6b87526549d992716d2a8680a255b3495633351cc39be56af076ab403",
+      "redacted": true,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/adjacent-baseline/clone-baseline.receipt.json",
+      "role": "original per-command receipt",
+      "source_bytes": 766,
+      "source_sha256": "13b235114ef44ab8592b9c28dadf915c684ebf31a30cccc825b2ec81b4679790",
+      "saved_bytes": 756,
+      "saved_sha256": "1e3712fad686b3376ca8cf9c5540103a801651328b80e3c481ec6dace0bef4f4",
+      "redacted": true,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/adjacent-baseline/reconcile-timeout-race.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 4369,
+      "source_sha256": "6a953216c26eb4aa9b5f22ec1963cecc631cd3f3ded626fc143e42bf48507f7b",
+      "saved_bytes": 4369,
+      "saved_sha256": "6a953216c26eb4aa9b5f22ec1963cecc631cd3f3ded626fc143e42bf48507f7b",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/adjacent-baseline/reconcile-timeout-race.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/adjacent-baseline/reconcile-timeout-race.receipt.json",
+      "role": "original per-command receipt",
+      "source_bytes": 1108,
+      "source_sha256": "b9b9c0024f4c837f541a6a4bf914cc1cbb00255573e8f5dfb81d772a2bcf86c6",
+      "saved_bytes": 1108,
+      "saved_sha256": "b9b9c0024f4c837f541a6a4bf914cc1cbb00255573e8f5dfb81d772a2bcf86c6",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/adjacent-baseline/diff-check.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/adjacent-baseline/diff-check.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/adjacent-baseline/diff-check.receipt.json",
+      "role": "original per-command receipt",
+      "source_bytes": 546,
+      "source_sha256": "2fa384965646b3ae4402d848ecf677a700a91e0e8841e70304046a9e88462a7e",
+      "saved_bytes": 546,
+      "saved_sha256": "2fa384965646b3ae4402d848ecf677a700a91e0e8841e70304046a9e88462a7e",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/build-vet/receipt.json",
+      "role": "original phase receipt",
+      "source_bytes": 3597,
+      "source_sha256": "c133489b2a7108be75aa69b3037d181deaf30c0644a1148d141e520c64cd6a79",
+      "saved_bytes": 3597,
+      "saved_sha256": "c133489b2a7108be75aa69b3037d181deaf30c0644a1148d141e520c64cd6a79",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/build-vet/build.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/build-vet/build.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/build-vet/build.receipt.json",
+      "role": "original per-command receipt",
+      "source_bytes": 537,
+      "source_sha256": "faf00bbdf8ef7aff6b6d7033ab30362b049e6232fdf83be60b7d76f7beec4a4f",
+      "saved_bytes": 537,
+      "saved_sha256": "faf00bbdf8ef7aff6b6d7033ab30362b049e6232fdf83be60b7d76f7beec4a4f",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/build-vet/vet.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/build-vet/vet.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/build-vet/vet.receipt.json",
+      "role": "original per-command receipt",
+      "source_bytes": 533,
+      "source_sha256": "0d33cefb6935791e89d0f7bdb755b29a87a369d384c6ed1eccb9f437be3eff71",
+      "saved_bytes": 533,
+      "saved_sha256": "0d33cefb6935791e89d0f7bdb755b29a87a369d384c6ed1eccb9f437be3eff71",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/build-vet/diff-check.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/build-vet/diff-check.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/build-vet/diff-check.receipt.json",
+      "role": "original per-command receipt",
+      "source_bytes": 546,
+      "source_sha256": "465b2ff6a050e3e5a08f79cb4555928767ece92cd2340381ca5d5652aabbb26a",
+      "saved_bytes": 546,
+      "saved_sha256": "465b2ff6a050e3e5a08f79cb4555928767ece92cd2340381ca5d5652aabbb26a",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/published-checkout/receipt.json",
+      "role": "original phase receipt",
+      "source_bytes": 3399,
+      "source_sha256": "5d6e036458473b8325b6ed70d59fceedc67a8aeeb0035ec557eb30df8ed16371",
+      "saved_bytes": 3399,
+      "saved_sha256": "5d6e036458473b8325b6ed70d59fceedc67a8aeeb0035ec557eb30df8ed16371",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/published-checkout/stage-exact-files.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/published-checkout/stage-exact-files.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/published-checkout/fetch-exact-commit.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/published-checkout/fetch-exact-commit.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 128,
+      "source_sha256": "357e8c86710a4903ea82181b90de2c6569eab05d5de9784da6e8f06ead05f0bd",
+      "saved_bytes": 128,
+      "saved_sha256": "357e8c86710a4903ea82181b90de2c6569eab05d5de9784da6e8f06ead05f0bd",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/published-checkout/checkout-detached.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/published-checkout/checkout-detached.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 198,
+      "source_sha256": "3f5951731f8f87c71364ff3fc7c1fc9a6d6b867c248e3c3c33b64225136e4d30",
+      "saved_bytes": 198,
+      "saved_sha256": "3f5951731f8f87c71364ff3fc7c1fc9a6d6b867c248e3c3c33b64225136e4d30",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/published/receipt.json",
+      "role": "original phase receipt",
+      "source_bytes": 5589,
+      "source_sha256": "935b778966a81659579cdb0da4babb6bdd22ff88fd27fc8eb403b04d322ae69e",
+      "saved_bytes": 5589,
+      "saved_sha256": "935b778966a81659579cdb0da4babb6bdd22ff88fd27fc8eb403b04d322ae69e",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/published/scheduler-contract-race.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 27301,
+      "source_sha256": "9e260b0e60a1e6ccc5bcdb16ef6e42164817600cb3f38da94b58de0cf28a6b32",
+      "saved_bytes": 27301,
+      "saved_sha256": "9e260b0e60a1e6ccc5bcdb16ef6e42164817600cb3f38da94b58de0cf28a6b32",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/published/scheduler-contract-race.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/published/scheduler-contract-race.receipt.json",
+      "role": "original per-command receipt",
+      "source_bytes": 3073,
+      "source_sha256": "547ffcfec4379c20740aa2ad52e32d4abfed90e927ce4d0723f60ee04caaa0ae",
+      "saved_bytes": 3073,
+      "saved_sha256": "547ffcfec4379c20740aa2ad52e32d4abfed90e927ce4d0723f60ee04caaa0ae",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/published/diff-check.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/published/diff-check.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/published/diff-check.receipt.json",
+      "role": "original per-command receipt",
+      "source_bytes": 546,
+      "source_sha256": "a9017d3ef2efa0fdbe07d12155390f2b546e2bcee4e7cb373ef860000d4c1722",
+      "saved_bytes": 546,
+      "saved_sha256": "a9017d3ef2efa0fdbe07d12155390f2b546e2bcee4e7cb373ef860000d4c1722",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/scripts/check_cli.py",
+      "role": "retained runner/preparation version",
+      "source_bytes": 11429,
+      "source_sha256": "06cb0f648dd8137919247fe5dd4c23e91c884a2ac73d799f073a9ad01f24fe55",
+      "saved_bytes": 11420,
+      "saved_sha256": "67dac3ddafb6829e8f66fec0771c3c485d1dadb1b496a6412ea458780b83a778",
+      "redacted": true,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/scripts/checkout_published.py",
+      "role": "retained runner/preparation version",
+      "source_bytes": 5007,
+      "source_sha256": "cc213c911110e7589493924ed3a7daa70aa1466f5cf3c3fd8db69f45b5f93eea",
+      "saved_bytes": 5004,
+      "saved_sha256": "7464d9d1f4de0e59d4b84fee4ba2950bf02feb2b6850df1a08a99ff3905ad25b",
+      "redacted": true,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/inputs/MANIFEST.json",
+      "role": "execution manifest",
+      "source_bytes": 2840,
+      "source_sha256": "2dc2c2b5d4078031b904af053b0ad4f8247b367ae966663f8ffb3f8ac21e5c39",
+      "saved_bytes": 2840,
+      "saved_sha256": "2dc2c2b5d4078031b904af053b0ad4f8247b367ae966663f8ffb3f8ac21e5c39",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/inputs/execution-MANIFEST.json",
+      "role": "execution manifest",
+      "source_bytes": 2840,
+      "source_sha256": "2dc2c2b5d4078031b904af053b0ad4f8247b367ae966663f8ffb3f8ac21e5c39",
+      "saved_bytes": 2840,
+      "saved_sha256": "2dc2c2b5d4078031b904af053b0ad4f8247b367ae966663f8ffb3f8ac21e5c39",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/inputs/review-MANIFEST.json",
+      "role": "final review manifest, not execution input",
+      "source_bytes": 3304,
+      "source_sha256": "693b3123ef67e900e996668032c2352805956eff737a9fecc439812010fbf709",
+      "saved_bytes": 3304,
+      "saved_sha256": "693b3123ef67e900e996668032c2352805956eff737a9fecc439812010fbf709",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/inputs/candidate.patch",
+      "role": "retained patch version",
+      "source_bytes": 2911,
+      "source_sha256": "bb58699e2a0b8c2b463cc61b612e22a5735426fc4373689ec0dfe0c58ec86761",
+      "saved_bytes": 2911,
+      "saved_sha256": "bb58699e2a0b8c2b463cc61b612e22a5735426fc4373689ec0dfe0c58ec86761",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/baseline/receipt.json",
+      "role": "original phase receipt",
+      "source_bytes": 5542,
+      "source_sha256": "becc6eb66c9d7ff004a0fc5cd98892514effa1b0b370853b948f5bc297101474",
+      "saved_bytes": 5537,
+      "saved_sha256": "6874f7b74dd53547b3b1e5595832510e324300bbb094553289bd65249e2d12a0",
+      "redacted": true,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/baseline/init-exact-source.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 98,
+      "source_sha256": "b5a8baede017780ce8632fb7995beebdd2d9b46d9cec3722cb99daa80e8ce692",
+      "saved_bytes": 95,
+      "saved_sha256": "429a202c4a185bc84b9a7ef39a5ab8286b4a761395b2e38a2a70a83be930332a",
+      "redacted": true,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/baseline/init-exact-source.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 586,
+      "source_sha256": "3e70934f1909b0f5a846d62237fcc1509d733b9fb0321187024723dfc67176d3",
+      "saved_bytes": 586,
+      "saved_sha256": "3e70934f1909b0f5a846d62237fcc1509d733b9fb0321187024723dfc67176d3",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/baseline/init-exact-source.receipt.json",
+      "role": "original per-command receipt",
+      "source_bytes": 646,
+      "source_sha256": "638ec72a78f76e4636950b148fb8fe93c6dae33f56d5b55e38aaa4cdd7381665",
+      "saved_bytes": 641,
+      "saved_sha256": "501bd318de2094d18115d3740353c6960d8b5e6d292c452f7e49ea307dc16cc9",
+      "redacted": true,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/baseline/fetch-exact-base.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/baseline/fetch-exact-base.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 128,
+      "source_sha256": "622ebb620de20f770602a4085d11a3cecc0195987883edb88fd1eb392fae2722",
+      "saved_bytes": 128,
+      "saved_sha256": "622ebb620de20f770602a4085d11a3cecc0195987883edb88fd1eb392fae2722",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/baseline/fetch-exact-base.receipt.json",
+      "role": "original per-command receipt",
+      "source_bytes": 753,
+      "source_sha256": "30a51a642026f5dd56e47b39f3c11e2fa9945c4f9ee3e6127b4020cd647cfda5",
+      "saved_bytes": 753,
+      "saved_sha256": "30a51a642026f5dd56e47b39f3c11e2fa9945c4f9ee3e6127b4020cd647cfda5",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/baseline/go-version.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 34,
+      "source_sha256": "bd74e61f96314b4c2e72e63319395345bc2817752bbdd3fc177a9edb2eb2ba14",
+      "saved_bytes": 34,
+      "saved_sha256": "bd74e61f96314b4c2e72e63319395345bc2817752bbdd3fc177a9edb2eb2ba14",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/baseline/go-version.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/baseline/go-version.receipt.json",
+      "role": "original per-command receipt",
+      "source_bytes": 533,
+      "source_sha256": "0000688c905332db818c4327c21ec9323b8f45fd494689c9c783de6fbdfcbd07",
+      "saved_bytes": 533,
+      "saved_sha256": "0000688c905332db818c4327c21ec9323b8f45fd494689c9c783de6fbdfcbd07",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/baseline/baseline-timeout-race.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 4353,
+      "source_sha256": "29952a0bd1480a200bc05e1c0a987e6f1c5d4ec3ce23213b469b4c1aebab21e8",
+      "saved_bytes": 4353,
+      "saved_sha256": "29952a0bd1480a200bc05e1c0a987e6f1c5d4ec3ce23213b469b4c1aebab21e8",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/baseline/baseline-timeout-race.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/baseline/baseline-timeout-race.receipt.json",
+      "role": "original per-command receipt",
+      "source_bytes": 1107,
+      "source_sha256": "b80cf481503b617b86015faa4fa20420abeb2dad0085b11ce4b6ab4f84bec935",
+      "saved_bytes": 1107,
+      "saved_sha256": "b80cf481503b617b86015faa4fa20420abeb2dad0085b11ce4b6ab4f84bec935",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/baseline/diff-check.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/baseline/diff-check.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/baseline/diff-check.receipt.json",
+      "role": "original per-command receipt",
+      "source_bytes": 546,
+      "source_sha256": "1eded4b8e94ab2f7e32e5c21ea8c55ca32168731bf68b3bef0c45d0918990001",
+      "saved_bytes": 546,
+      "saved_sha256": "1eded4b8e94ab2f7e32e5c21ea8c55ca32168731bf68b3bef0c45d0918990001",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/candidate/receipt.json",
+      "role": "original phase receipt",
+      "source_bytes": 5693,
+      "source_sha256": "d2ab5af0a6094b858cc08c934a357decda372db7fc6dcc3e162fc8b58d0375d0",
+      "saved_bytes": 5683,
+      "saved_sha256": "d336a2258aa58557c88689afc92ded4a821cdc361746582296b78f896314def8",
+      "redacted": true,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/candidate/check-test-patch.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/candidate/check-test-patch.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/candidate/check-test-patch.receipt.json",
+      "role": "original per-command receipt",
+      "source_bytes": 628,
+      "source_sha256": "992674102998bbd358b9d59581127328d398dfcd5170b6825e25b1436020d1dc",
+      "saved_bytes": 623,
+      "saved_sha256": "e915a28ae12da0ff1223e3a1568b7f50b55afe8989bb428c1f34468a2ef4abe6",
+      "redacted": true,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/candidate/apply-test-patch.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/candidate/apply-test-patch.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/candidate/apply-test-patch.receipt.json",
+      "role": "original per-command receipt",
+      "source_bytes": 614,
+      "source_sha256": "aea9473a56ba56f1330a43a288c405ea90a71ed318efe3016a5f1017f092167c",
+      "saved_bytes": 609,
+      "saved_sha256": "a6c11524d308f5b1658f4124c546053a91e84aca7731dae9a093258530e9206d",
+      "redacted": true,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/candidate/format-test.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/candidate/format-test.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/candidate/format-test.receipt.json",
+      "role": "original per-command receipt",
+      "source_bytes": 584,
+      "source_sha256": "11fd944fb7ca6507c85bf3801c5bc55f6e12a8bb3b94f98087d965a1b8b36302",
+      "saved_bytes": 584,
+      "saved_sha256": "11fd944fb7ca6507c85bf3801c5bc55f6e12a8bb3b94f98087d965a1b8b36302",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/candidate/parent-cancellation-race.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 3769,
+      "source_sha256": "12e1f39d66bb75f93cf824c85be883606077be38635653faa83c5577bc2755cc",
+      "saved_bytes": 3769,
+      "saved_sha256": "12e1f39d66bb75f93cf824c85be883606077be38635653faa83c5577bc2755cc",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/candidate/parent-cancellation-race.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/candidate/parent-cancellation-race.receipt.json",
+      "role": "original per-command receipt",
+      "source_bytes": 1117,
+      "source_sha256": "cceaf29d7f473e3d8d98efeb7e5ca8efa9f7faa0791e1d2d149117838ed6a6f6",
+      "saved_bytes": 1117,
+      "saved_sha256": "cceaf29d7f473e3d8d98efeb7e5ca8efa9f7faa0791e1d2d149117838ed6a6f6",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/candidate/diff-check.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/candidate/diff-check.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/candidate/diff-check.receipt.json",
+      "role": "original per-command receipt",
+      "source_bytes": 546,
+      "source_sha256": "646c8b5a4d3f98881dffc2146865ad19acaf924356eb43aa41d3a43d54e60ea2",
+      "saved_bytes": 546,
+      "saved_sha256": "646c8b5a4d3f98881dffc2146865ad19acaf924356eb43aa41d3a43d54e60ea2",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/build-vet/receipt.json",
+      "role": "original phase receipt",
+      "source_bytes": 3295,
+      "source_sha256": "74e7029177acd4782442d09613871b304b6faefb0d204ac5db15a0c332d44ca6",
+      "saved_bytes": 3295,
+      "saved_sha256": "74e7029177acd4782442d09613871b304b6faefb0d204ac5db15a0c332d44ca6",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/build-vet/build.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/build-vet/build.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/build-vet/build.receipt.json",
+      "role": "original per-command receipt",
+      "source_bytes": 537,
+      "source_sha256": "282525078ab3ce88046ea7c1d05f8e4b629514d22bf3a718938b7c25d836d234",
+      "saved_bytes": 537,
+      "saved_sha256": "282525078ab3ce88046ea7c1d05f8e4b629514d22bf3a718938b7c25d836d234",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/build-vet/vet.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/build-vet/vet.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/build-vet/vet.receipt.json",
+      "role": "original per-command receipt",
+      "source_bytes": 533,
+      "source_sha256": "ddb3414f1cd81f3d77faf118382948a12fb465376f65bf1e7b2648ea26ad976a",
+      "saved_bytes": 533,
+      "saved_sha256": "ddb3414f1cd81f3d77faf118382948a12fb465376f65bf1e7b2648ea26ad976a",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/build-vet/diff-check.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/build-vet/diff-check.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/build-vet/diff-check.receipt.json",
+      "role": "original per-command receipt",
+      "source_bytes": 546,
+      "source_sha256": "f4d6ee933c39efdb46712d62bf2e6dc79a7e6d013c31c9a458c7ef44466bc269",
+      "saved_bytes": 546,
+      "saved_sha256": "f4d6ee933c39efdb46712d62bf2e6dc79a7e6d013c31c9a458c7ef44466bc269",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/published-checkout/receipt.json",
+      "role": "original phase receipt",
+      "source_bytes": 3091,
+      "source_sha256": "7cb6517f29eb60f7fae2ee56a5d8424ac2116f618a504b4f8e6bb496a3a23964",
+      "saved_bytes": 3091,
+      "saved_sha256": "7cb6517f29eb60f7fae2ee56a5d8424ac2116f618a504b4f8e6bb496a3a23964",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/published-checkout/stage-exact-files.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/published-checkout/stage-exact-files.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/published-checkout/fetch-exact-commit.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/published-checkout/fetch-exact-commit.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 128,
+      "source_sha256": "cc50e38315dccdd14116f48395d06b4fb83b80122917fe1b0c1ceef41aefa0f0",
+      "saved_bytes": 128,
+      "saved_sha256": "cc50e38315dccdd14116f48395d06b4fb83b80122917fe1b0c1ceef41aefa0f0",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/published-checkout/checkout-detached.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/published-checkout/checkout-detached.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 183,
+      "source_sha256": "ccf64b8e4b90b988d19dcbf1aca6d9edaed17dd0e7f94a88f0b80b3a70021258",
+      "saved_bytes": 183,
+      "saved_sha256": "ccf64b8e4b90b988d19dcbf1aca6d9edaed17dd0e7f94a88f0b80b3a70021258",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/published/receipt.json",
+      "role": "original phase receipt",
+      "source_bytes": 3279,
+      "source_sha256": "8e5d5ba95909c25753e0f3d358d32241075ff8571611c56a51d551db01f7e0ac",
+      "saved_bytes": 3279,
+      "saved_sha256": "8e5d5ba95909c25753e0f3d358d32241075ff8571611c56a51d551db01f7e0ac",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/published/parent-cancellation-race.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 3770,
+      "source_sha256": "d84efaccfda33b529c1b21bfb3664bad4c928c8721a4f6b47ff397ff7acf5a80",
+      "saved_bytes": 3770,
+      "saved_sha256": "d84efaccfda33b529c1b21bfb3664bad4c928c8721a4f6b47ff397ff7acf5a80",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/published/parent-cancellation-race.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/published/parent-cancellation-race.receipt.json",
+      "role": "original per-command receipt",
+      "source_bytes": 1117,
+      "source_sha256": "5eba421edcf79ae9b09675278445dc4a3cd1d9e96dfa0b4c629550e575df2fae",
+      "saved_bytes": 1117,
+      "saved_sha256": "5eba421edcf79ae9b09675278445dc4a3cd1d9e96dfa0b4c629550e575df2fae",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/published/diff-check.stdout.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/published/diff-check.stderr.log",
+      "role": "original command stream",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "saved_bytes": 0,
+      "saved_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "cli/published/diff-check.receipt.json",
+      "role": "original per-command receipt",
+      "source_bytes": 546,
+      "source_sha256": "f1362b0a0b33c8d739dda764af011fa77f2cd1b4915624a967fa104217506d07",
+      "saved_bytes": 546,
+      "saved_sha256": "f1362b0a0b33c8d739dda764af011fa77f2cd1b4915624a967fa104217506d07",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "scheduler/source-review.json",
+      "role": "bounded literal source scan",
+      "source_bytes": 35693,
+      "source_sha256": "ab6c003c8d7dfc938bed1c50c6941fb24c0b52791bd8373b50723798b4f0b9af",
+      "saved_bytes": 35693,
+      "saved_sha256": "ab6c003c8d7dfc938bed1c50c6941fb24c0b52791bd8373b50723798b4f0b9af",
+      "redacted": false,
+      "generated_in_memory": false
+    },
+    {
+      "path": "execution-summary.json",
+      "role": "generated admission summary",
+      "source_bytes": 36032,
+      "source_sha256": "d6262088ed72f1a945bf6ebec15ed885bc9a9b769ade6c9995c7504b08a3a18c",
+      "saved_bytes": 35977,
+      "saved_sha256": "b5869186287883c0cc0fa29f1287cba3548a1b396fc5930ff9019628198474b2",
+      "redacted": true,
+      "generated_in_memory": true
+    },
+    {
+      "path": "source-identities.json",
+      "role": "generated published identities",
+      "source_bytes": 810,
+      "source_sha256": "47abc380784076c50d12eb30091d63c51d95c52231cebc79ea1eea47cbe5f480",
+      "saved_bytes": 810,
+      "saved_sha256": "47abc380784076c50d12eb30091d63c51d95c52231cebc79ea1eea47cbe5f480",
+      "redacted": false,
+      "generated_in_memory": true
+    }
+  ]
+}

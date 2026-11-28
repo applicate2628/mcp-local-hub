@@ -1,0 +1,103 @@
+{
+  "schema": "r25-budget-deliverable-v2",
+  "preparation": {
+    "go_executed": false,
+    "remote_execution": false,
+    "production_changes": false,
+    "github_mutations": false
+  },
+  "runtime_analysis": {
+    "supplied_remote_execution_included": true,
+    "new_go_or_remote_execution_by_reducer_agent": false,
+    "complete_selection": true,
+    "root_count": 1,
+    "case_count": 34,
+    "phase_records": 190,
+    "full_suite_qualification": false
+  },
+  "files": {
+    "phase-instrumentation.patch": {
+      "bytes": 3160,
+      "sha256": "a1d134461054b243f7d21938793ed5d5922d7decef7da7c5ba9746dd7976cdef"
+    },
+    "diagnostic-selection.json": {
+      "bytes": 6110,
+      "sha256": "da347903ee3c3295c16a007df0e3bfbf3f5bee7c38ca756adc4dd6c119d7e4c9"
+    },
+    "summarize_diagnostic.py": {
+      "bytes": 6709,
+      "sha256": "26f0c4ac7ada74c1409125dc4b62ce648b558651463d5a4ba52510187c7ce50a"
+    },
+    "candidate/internal/cli/install_reconcile_mcp_front_v3_test.go": {
+      "bytes": 113455,
+      "sha256": "fc620b87ff343e075b7419e2dc2bf91e8e8a09da2a7e3634962630a5d97a30ce"
+    },
+    "source-manifest.json": {
+      "bytes": 5534,
+      "sha256": "19ca203228e942fe4dbc581280d9d462e186e76431e66596f4e0dfd02ea6f10e"
+    },
+    "source-637-manifest.json": {
+      "bytes": 3267,
+      "sha256": "f9e74f8a50a15ca667035702608011e762a72c3d5a05607dd0d0b9bce4a01f13"
+    },
+    "patch-static-checks.json": {
+      "bytes": 150,
+      "sha256": "cc98175a09f7e47119dcfe2f2d47d63bb75dcf95cd0f685775c9f67dd2aa6382"
+    },
+    "reducer-selfcheck.json": {
+      "bytes": 665,
+      "sha256": "3eb52f7ac13e1ff1a8c14b30243e589faf187ddbab81dd95685cdbed73485958"
+    },
+    "source-diff-proof.json": {
+      "bytes": 2007,
+      "sha256": "2d2026f6448b4019b7002c26d331e254567288589fe9b9d583e13343f160ee13"
+    },
+    "README.md": {
+      "bytes": 34971,
+      "sha256": "777561aba30561eb0073a6de65d810c2289a0293d438c21b56e8f8f947b3baa0"
+    },
+    "runtime-result.json": {
+      "bytes": 43682,
+      "sha256": "48ca3c0b5931cab02fee7c97e5580a9339460cb13c10d95d138f96b64dd025fe"
+    },
+    "runtime-summary.json": {
+      "bytes": 6263,
+      "sha256": "12a3807a27524a885c0f395d730e23115f087eacbf47fe3c5570e7448051a29d"
+    },
+    "RUNTIME.md": {
+      "bytes": 15817,
+      "sha256": "6d635b59e6552721c0afb355a82041d68d9cf6b32e1720df6fd2dbda43fb2900"
+    },
+    "invalid-seeding.patch": {
+      "bytes": 7360,
+      "sha256": "81fda39721148d69efacc9b342bd4b3f02d23b683fe9eeecbc71412f993c61ca"
+    },
+    "seeding-contract.json": {
+      "bytes": 19539,
+      "sha256": "d313dc17107c150fa38c5dc0124b18d935184fceea730f1fb2edc1201798bfa2"
+    },
+    "SEEDING.md": {
+      "bytes": 18850,
+      "sha256": "87a950a2cd7336728cc743e09394a0725e3773316a3ed9efbb2ff68cc8b72dfc"
+    },
+    "seeding-candidate/internal/cli/install_reconcile_mcp_front_v3_test.go": {
+      "bytes": 113769,
+      "sha256": "129cfb1db6243af558261cc2899c172667b756529ae67ee2cc1cd3a5951b7e25"
+    },
+    "seeding-source/internal/api/hub_mcp_state_read_inode_windows.go": {
+      "bytes": 16950,
+      "sha256": "57d97fc082a20efce4bcc30b8cdcde0d0460502bcf2f5393a12266ee6791ff4d"
+    },
+    "seeding-source/internal/api/state_read_inode_anchor.go": {
+      "bytes": 6475,
+      "sha256": "87511f3b83bb4d0371bbf6664a8da315eb5d7cb3b4b4386c3e61a8272b4005d2"
+    }
+  },
+  "invalid_seeding_candidate": {
+    "source_ref": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+    "only_test_root_changed": true,
+    "go_or_remote_execution": false,
+    "production_changes": false,
+    "native_leaf_dacl_admission": "pending"
+  }
+}

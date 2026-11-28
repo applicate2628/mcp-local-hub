@@ -1,0 +1,79 @@
+{
+  "source_pr": 636,
+  "source_head": "acac454e539a6b951d4b6ee998cc2142ee153069",
+  "target_pr": 637,
+  "target_head": "1ebe00c5dbac448488d980072e689b1126875dde",
+  "verified_ancestor": true,
+  "files": [
+    {
+      "path": "internal/api/serena_publisher_image.go",
+      "blob": "2492f66bd6c667343e39ff485651205e4df06423",
+      "exact_content_equal_to_donor": true
+    },
+    {
+      "path": "internal/api/serena_publisher_role.go",
+      "blob": "0abf286e186990203e5af49560890769b6df67c0",
+      "exact_content_equal_to_donor": true
+    },
+    {
+      "path": "internal/api/serena_publisher_role_qualification_windows.go",
+      "blob": "ef1dae5405644964b224c917c3f34a96a8012220",
+      "exact_content_equal_to_donor": true
+    },
+    {
+      "path": "internal/api/serena_publisher_role_qualification_windows_test.go",
+      "blob": "acc6a0d1184c50021d0c1fb6e9cb3489aa8537e0",
+      "exact_content_equal_to_donor": true
+    },
+    {
+      "path": "internal/api/serena_qualification_namespace_directory_windows.go",
+      "blob": "24d662ca1dbb785e8d6684dca7fc166c4894e5ab",
+      "exact_content_equal_to_donor": true
+    },
+    {
+      "path": "internal/api/serena_qualification_namespace_unavailable_test.go",
+      "blob": "2a29665a9ba9d66d95a7844d409492d8accbdd3f",
+      "exact_content_equal_to_donor": true
+    },
+    {
+      "path": "internal/api/serena_qualification_namespace_windows.go",
+      "blob": "cf4e435ed736f962f7dd6ce9151f0e3a099c5cb8",
+      "exact_content_equal_to_donor": true
+    },
+    {
+      "path": "internal/api/serena_qualification_namespace_windows_test.go",
+      "blob": "b93596e6d1508f4154c5afd115e06f8c28e6d8b7",
+      "exact_content_equal_to_donor": true
+    },
+    {
+      "path": "internal/api/state_dir_resolution_observed.go",
+      "blob": "87da7eaaac0efefc8fbb4997a5196a2fedf10be9",
+      "exact_content_equal_to_donor": true
+    },
+    {
+      "path": "internal/api/state_dir_resolution_observed_production_windows.go",
+      "blob": "ab9c91251bfbef26173a10df46265add3940f142",
+      "exact_content_equal_to_donor": true
+    },
+    {
+      "path": "internal/api/state_dir_resolution_observed_qualification_incomplete_windows.go",
+      "blob": "2dddab20730d929e850711e01d590dbbd09eef45",
+      "exact_content_equal_to_donor": true
+    },
+    {
+      "path": "internal/api/state_dir_resolution_observed_qualification_incomplete_windows_test.go",
+      "blob": "a68b86441adc6e3139dd10ba75db13e9ef8945a2",
+      "exact_content_equal_to_donor": true
+    },
+    {
+      "path": "internal/api/state_dir_resolution_observed_qualification_unavailable.go",
+      "blob": "a2965e968bd579deeff97d845a2a24b0038dea42",
+      "exact_content_equal_to_donor": true
+    },
+    {
+      "path": "internal/api/state_dir_resolution_observed_windows.go",
+      "blob": "37bf02857efaba03c272d8f851ccf0fec388df95",
+      "exact_content_equal_to_donor": true
+    }
+  ]
+}

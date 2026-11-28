@@ -1,0 +1,253 @@
+{
+  "schema": 1,
+  "mode": "read-only bounded filesystem inventory",
+  "observed_utc": "2026-11-21T09:20:26.726462+00:00",
+  "python": "<USER_PROFILE>\\AppData\\Local\\Programs\\Python\\Python314\\python.exe",
+  "cwd": "<WORK_ROOT>",
+  "limits": {
+    "max_depth": 5,
+    "entries_per_root": 3000,
+    "entries_total": 25000,
+    "seconds": 25
+  },
+  "excluded_names": [
+    ".git",
+    ".venv",
+    "gocache",
+    "gomodcache",
+    "node_modules",
+    "runtime",
+    "target",
+    "targets",
+    "temp",
+    "tmp",
+    "trash",
+    "venv"
+  ],
+  "tests_build_cargo_providers_run": false,
+  "remote_files_written": false,
+  "roots": [
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-host-recovery-work-20261119",
+      "directories": 1,
+      "entries": 3,
+      "excluded_directories": 0,
+      "reparse_skipped": 0,
+      "depth_pruned": 0,
+      "limits_hit": [],
+      "errors": []
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-members-ffi-20261118",
+      "directories": 169,
+      "entries": 3000,
+      "excluded_directories": 0,
+      "reparse_skipped": 0,
+      "depth_pruned": 0,
+      "limits_hit": [
+        {
+          "reason": "directory_entry_cap",
+          "path": "<WORK_ROOT>\\mcp-product-rust-members-ffi-20261118\\docs\\superpowers\\plans"
+        },
+        {
+          "reason": "entry_cap",
+          "pending_directories": 42
+        }
+      ],
+      "errors": []
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-members-ffi-work-20261118",
+      "directories": 251,
+      "entries": 3000,
+      "excluded_directories": 2,
+      "reparse_skipped": 0,
+      "depth_pruned": 0,
+      "limits_hit": [
+        {
+          "reason": "directory_entry_cap",
+          "path": "<WORK_ROOT>\\mcp-product-rust-members-ffi-work-20261118\\go-cache\\ef"
+        },
+        {
+          "reason": "entry_cap",
+          "pending_directories": 35
+        }
+      ],
+      "errors": []
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-native-members-20261118",
+      "directories": 156,
+      "entries": 3000,
+      "excluded_directories": 0,
+      "reparse_skipped": 0,
+      "depth_pruned": 0,
+      "limits_hit": [
+        {
+          "reason": "directory_entry_cap",
+          "path": "<WORK_ROOT>\\mcp-product-rust-native-members-20261118\\internal\\api\\serena_routing"
+        },
+        {
+          "reason": "entry_cap",
+          "pending_directories": 40
+        }
+      ],
+      "errors": []
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-native-members-work-20261118",
+      "directories": 653,
+      "entries": 1744,
+      "excluded_directories": 2,
+      "reparse_skipped": 0,
+      "depth_pruned": 32,
+      "limits_hit": [],
+      "errors": []
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-root-wait-20261118",
+      "directories": 155,
+      "entries": 3000,
+      "excluded_directories": 0,
+      "reparse_skipped": 0,
+      "depth_pruned": 0,
+      "limits_hit": [
+        {
+          "reason": "directory_entry_cap",
+          "path": "<WORK_ROOT>\\mcp-product-rust-root-wait-20261118\\internal\\vcpkgmcp\\lastfailure"
+        },
+        {
+          "reason": "entry_cap",
+          "pending_directories": 33
+        }
+      ],
+      "errors": []
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-root-wait-work-20261118",
+      "directories": 20,
+      "entries": 65,
+      "excluded_directories": 3,
+      "reparse_skipped": 0,
+      "depth_pruned": 0,
+      "limits_hit": [],
+      "errors": []
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust100-recovery-work-20261119",
+      "directories": 1,
+      "entries": 2,
+      "excluded_directories": 0,
+      "reparse_skipped": 0,
+      "depth_pruned": 0,
+      "limits_hit": [],
+      "errors": []
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-r23-rust-20261121",
+      "directories": 35,
+      "entries": 170,
+      "excluded_directories": 7,
+      "reparse_skipped": 0,
+      "depth_pruned": 0,
+      "limits_hit": [],
+      "errors": []
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-rust-receiving-followup-recovery-work-20261120",
+      "directories": 4,
+      "entries": 71,
+      "excluded_directories": 0,
+      "reparse_skipped": 0,
+      "depth_pruned": 0,
+      "limits_hit": [],
+      "errors": []
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-rust-supervisor-recovery-work-20261119",
+      "directories": 3,
+      "entries": 6,
+      "excluded_directories": 0,
+      "reparse_skipped": 0,
+      "depth_pruned": 0,
+      "limits_hit": [],
+      "errors": []
+    }
+  ],
+  "candidates": [],
+  "archives": [
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-native-members-work-20261118\\archives\\windows-link-0.2.1.crate",
+      "bytes": 6133
+    },
+    {
+      "path": "<WORK_ROOT>\\mcp-product-rust-native-members-work-20261118\\archives\\windows-sys-0.61.2.crate",
+      "bytes": 2517186
+    }
+  ],
+  "lock": {
+    "path": "<WORK_ROOT>\\mcp-r23-rust-20261121\\source-pr627\\experiments\\rust-anchored-read\\Cargo.lock",
+    "git_blob": "bf195e14a3b725f5a64c8e577de56e2b605018a3",
+    "sha256": "6cd7b98899c6afe742b1ca177e947b360e78b2662c4b6b7778eb1e32e619e026",
+    "missing_registry_packages": [
+      {
+        "name": "block-buffer",
+        "version": "0.10.4",
+        "checksum": "3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71"
+      },
+      {
+        "name": "cfg-if",
+        "version": "1.0.4",
+        "checksum": "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
+      },
+      {
+        "name": "cpufeatures",
+        "version": "0.2.17",
+        "checksum": "59ed5838eebb26a2bb2e58f6d5b5316989ae9d08bab10e0e6d103e656d1b0280"
+      },
+      {
+        "name": "crypto-common",
+        "version": "0.1.7",
+        "checksum": "78c8292055d1c1df0cce5d180393dc8cce0abec0a7102adb6c7b1eef6016d60a"
+      },
+      {
+        "name": "digest",
+        "version": "0.10.7",
+        "checksum": "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292"
+      },
+      {
+        "name": "generic-array",
+        "version": "0.14.7",
+        "checksum": "85649ca51fd72272d7821adaf274ad91c288277713d9c18820d8499a7ff69e9a"
+      },
+      {
+        "name": "libc",
+        "version": "0.2.186",
+        "checksum": "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
+      },
+      {
+        "name": "sha2",
+        "version": "0.10.9",
+        "checksum": "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283"
+      },
+      {
+        "name": "typenum",
+        "version": "1.20.1",
+        "checksum": "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
+      },
+      {
+        "name": "version_check",
+        "version": "0.9.5",
+        "checksum": "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+      },
+      {
+        "name": "zeroize",
+        "version": "1.9.0",
+        "checksum": "e13c156562582aa81c60cb29407084cdb54c4164760106ab78e6c5b0858cf64e"
+      }
+    ]
+  },
+  "entries_total": 14061,
+  "elapsed_seconds": 4.827892400091514,
+  "global_absence_claimed": false
+}

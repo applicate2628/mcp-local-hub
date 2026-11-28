@@ -1,0 +1,19 @@
+{
+  "schema": "r25-local-redaction-preimage-check-v1",
+  "basis": "Retained original local source bytes matching the independently pinned script identities; private raw.zip was not read.",
+  "members": [
+    {
+      "public_member": "package_evidence.py",
+      "original_local_path": "r25-audit/archive/package_evidence.py",
+      "original_sha256": "bd655c27959379e17da702ebc13d47a475b8f7a2e04e923ef5c78bf034d510e9",
+      "exact_declared_redaction_matched": true
+    },
+    {
+      "public_member": "package_evidence_v1.py",
+      "original_local_path": "r25-audit/archive/first-run-read-failure-v1/package_evidence.py",
+      "original_sha256": "80029a94fcc3e70c89d1e0ca16662587db3bb683e0d768fcfac2549241622b60",
+      "exact_declared_redaction_matched": true
+    }
+  ],
+  "limit": "This extra local preimage check is not reconstructible from the redacted public files alone."
+}

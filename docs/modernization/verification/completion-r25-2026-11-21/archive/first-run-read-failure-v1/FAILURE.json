@@ -1,0 +1,29 @@
+{
+  "schema": "r25-packager-failure-preservation-v1",
+  "state": "FAILED_BEFORE_PUBLICATION",
+  "basis": "root-reported first remote invocation; raw failure capture not provided to this reviewer yet",
+  "error_type": "ValueError",
+  "error": "Input changed while opening",
+  "execution": [
+    "Python314",
+    "-I",
+    "-B"
+  ],
+  "product_or_go_execution": false,
+  "existing_evidence_modified": false,
+  "failure_input_path": null,
+  "diagnosis": "Pending root read-only lstat/fstat observation; no guard change made",
+  "verifier_sha256": "7a5361a4eb4a1b802d91d8bfd8276e91487650b650ca5d8d005498852116a539",
+  "preserved_files": [
+    {
+      "path": "package_evidence.py",
+      "bytes": 12007,
+      "sha256": "80029a94fcc3e70c89d1e0ca16662587db3bb683e0d768fcfac2549241622b60"
+    },
+    {
+      "path": "archive-index.json",
+      "bytes": 4431,
+      "sha256": "36697e659091c0c99fbf45105eec03a34c017200623afa9ec1161ed7af3ef8f6"
+    }
+  ]
+}

@@ -1,0 +1,653 @@
+{
+  "repository": "applicate2628/mcp-local-hub",
+  "scope": "Read-only queue heads/draft/master and feedback on #623, #658, #660",
+  "observed_at_utc": "2026-11-20T21:33:47Z",
+  "observed_at_moscow": "2026-11-21T00:33:47.000+03:00",
+  "baseline": "<LOCAL_WORK_ROOT>/r19-cancellation/final-publication-check.json",
+  "baseline_observed_at_utc": "2026-11-20T16:27:17Z",
+  "review_identity_baseline": "<LOCAL_WORK_ROOT>/r19-cancellation/queue/snapshot.json",
+  "open_pr_count": 31,
+  "draft_pr_count": 31,
+  "open_list_pagination_complete": true,
+  "master": {
+    "sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+    "url": "https://api.github.com/repos/applicate2628/mcp-local-hub/git/refs/heads/master",
+    "baseline": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+    "unchanged": true
+  },
+  "comparison": {
+    "added": [],
+    "removed": [],
+    "head_changes": [],
+    "draft_changes": [],
+    "master_changed": false
+  },
+  "other_28_heads_unchanged": true,
+  "prs": [
+    {
+      "number": 623,
+      "title": "docs: cross-platform Rust roadmap, COM boundaries and targeted Python reduction",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/623",
+      "state": "open",
+      "draft": true,
+      "head": "203209df3a11b66ccba59cc7a308d3aa8e4cc7f8",
+      "head_ref": "docs/rust-cross-platform-no-com-20261112",
+      "base": "master",
+      "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "updated_at": "2026-11-20T16:27:55Z"
+    },
+    {
+      "number": 624,
+      "title": "test(perf): expand CMake trace benchmarks through bounded public output",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/624",
+      "state": "open",
+      "draft": true,
+      "head": "251fb4f03405ba438662976137afec0d9c27105e",
+      "head_ref": "perf/rx01-cmaketrace-benchmark-20261112",
+      "base": "master",
+      "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "updated_at": "2026-11-18T19:45:30Z"
+    },
+    {
+      "number": 625,
+      "title": "spike(rust): qualify process-owner lifecycle, launch context and native failures",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/625",
+      "state": "open",
+      "draft": true,
+      "head": "287a7772a4be75ed9fb2f9ba1feb68cf035ed907",
+      "head_ref": "spike/rx02-native-process-owner-20261112",
+      "base": "master",
+      "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "updated_at": "2026-11-18T18:15:57Z"
+    },
+    {
+      "number": 626,
+      "title": "test(perf): relay workload and executable-size control before Rust migration",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/626",
+      "state": "open",
+      "draft": true,
+      "head": "04e1e19650318725850225ebadc521cbf97dadd9",
+      "head_ref": "perf/rx01-relay-baseline-20261112",
+      "base": "master",
+      "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "updated_at": "2026-11-18T19:45:34Z"
+    },
+    {
+      "number": 627,
+      "title": "spike(rust): anchored verified file reader with native replacement and cap tests",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/627",
+      "state": "open",
+      "draft": true,
+      "head": "b827398ef127a1556b7b2bdcdcec7fe03fa6651d",
+      "head_ref": "spike/rx04-anchored-read-20261112",
+      "base": "master",
+      "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "updated_at": "2026-11-18T18:15:59Z"
+    },
+    {
+      "number": 628,
+      "title": "fix(status): observe Windows process identity and RSS through one handle",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/628",
+      "state": "open",
+      "draft": true,
+      "head": "453e856347cabcebb289ec1c9af70f12af3376c0",
+      "head_ref": "perf/rx16-native-observation-20261112",
+      "base": "master",
+      "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "updated_at": "2026-11-19T03:13:07Z"
+    },
+    {
+      "number": 629,
+      "title": "fix(relay): retain output failures and join owner-authorized stdin interruption",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/629",
+      "state": "open",
+      "draft": true,
+      "head": "e07dc80fe737e8e0c17d639f24a0c9a3581e037c",
+      "head_ref": "fix/relay-output-failure-contract-20261113",
+      "base": "master",
+      "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "updated_at": "2026-11-18T17:05:49Z"
+    },
+    {
+      "number": 631,
+      "title": "spike(ffi): qualify versioned original-process identity across Go and Rust",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/631",
+      "state": "open",
+      "draft": true,
+      "head": "ebfa4ef32b57cfa022acdcfcb4a2745f32b815c6",
+      "head_ref": "spike/rx02-go-rust-boundary-20261113",
+      "base": "spike/rx02-native-identity-20261114",
+      "base_sha": "71891067d0c24387ba873a3e4276b0462ae365ae",
+      "updated_at": "2026-11-18T19:20:52Z"
+    },
+    {
+      "number": 632,
+      "title": "fix(serena): discover UV from the qualified execution PATH",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/632",
+      "state": "open",
+      "draft": true,
+      "head": "ff4ba7f85fef35e19b39dced17d9df47bb9237a0",
+      "head_ref": "fix/serena-qualified-uv-path-20261114",
+      "base": "master",
+      "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "updated_at": "2026-11-18T16:56:02Z"
+    },
+    {
+      "number": 635,
+      "title": "test(serena): build a source-issued native qualification publisher",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/635",
+      "state": "open",
+      "draft": true,
+      "head": "1c135914c108dda8b63816175347c5da77da26d9",
+      "head_ref": "fix/serena-qualification-publisher-20261114",
+      "base": "fix/serena-qualified-uv-path-20261114",
+      "base_sha": "8cead428a6cee57c597e2bd3ed7b3877a6445d30",
+      "updated_at": "2026-11-18T15:44:58Z"
+    },
+    {
+      "number": 636,
+      "title": "test(serena): retain a private native qualification namespace",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/636",
+      "state": "open",
+      "draft": true,
+      "head": "acac454e539a6b951d4b6ee998cc2142ee153069",
+      "head_ref": "fix/serena-qualification-namespace-20261114",
+      "base": "fix/serena-qualification-publisher-20261114",
+      "base_sha": "6ca53c83aa4f8ccca9bc0eae3d91f3fff9ede109",
+      "updated_at": "2026-11-18T11:02:23Z"
+    },
+    {
+      "number": 637,
+      "title": "test(serena): run positive migration fixtures through real preparation",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/637",
+      "state": "open",
+      "draft": true,
+      "head": "2542d63d2f917dc414a387e0ed2ceb494d118cfe",
+      "head_ref": "fix/serena-integration-qualification-20261114",
+      "base": "fix/serena-qualification-namespace-20261114",
+      "base_sha": "acac454e539a6b951d4b6ee998cc2142ee153069",
+      "updated_at": "2026-11-18T15:48:53Z"
+    },
+    {
+      "number": 639,
+      "title": "fix(serena): keep Python output buffering outside build inputs",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/639",
+      "state": "open",
+      "draft": true,
+      "head": "98c4b54a69f2776fdabc2b8b8d19f09110e02a74",
+      "head_ref": "fix/serena-unbuffered-build-input-20261114",
+      "base": "master",
+      "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "updated_at": "2026-11-18T15:45:01Z"
+    },
+    {
+      "number": 643,
+      "title": "fix(serena): keep cleanup within its captured parent lifetime",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/643",
+      "state": "open",
+      "draft": true,
+      "head": "527574928335142d95bc073c6ca4459fef9f9f90",
+      "head_ref": "fix/serena-cleanup-parent-observation-20261114",
+      "base": "master",
+      "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "updated_at": "2026-11-18T15:45:02Z"
+    },
+    {
+      "number": 644,
+      "title": "spike(rust): observe original process identity while retaining ownership",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/644",
+      "state": "open",
+      "draft": true,
+      "head": "1cf5754b81c850a3569be269642b49605895eeb2",
+      "head_ref": "spike/rx02-native-identity-20261114",
+      "base": "spike/rx02-native-process-owner-20261112",
+      "base_sha": "c5672f49f65713c7555e8841e46de75b045da5f8",
+      "updated_at": "2026-11-18T19:20:50Z"
+    },
+    {
+      "number": 645,
+      "title": "fix(serena): accept native empty stream enumeration",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/645",
+      "state": "open",
+      "draft": true,
+      "head": "98511ab9ea633b7e47e825396f002dc783c51d9f",
+      "head_ref": "fix/serena-stream-enumeration-20261114",
+      "base": "master",
+      "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "updated_at": "2026-11-18T15:45:04Z"
+    },
+    {
+      "number": 646,
+      "title": "fix(serena): prefer qualified system Python discovery",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/646",
+      "state": "open",
+      "draft": true,
+      "head": "1df32782e7ade719e1d7f8c6153b4455a6ea740a",
+      "head_ref": "fix/serena-python-discovery-preference-20261114",
+      "base": "master",
+      "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "updated_at": "2026-11-18T15:45:05Z"
+    },
+    {
+      "number": 647,
+      "title": "fix(serena): own Windows Git subprocess environment",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/647",
+      "state": "open",
+      "draft": true,
+      "head": "6de482cdd09034f71b5e091cc9e385e229cd96a2",
+      "head_ref": "fix/serena-executable-discovery-20261114",
+      "base": "master",
+      "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "updated_at": "2026-11-18T15:45:06Z"
+    },
+    {
+      "number": 648,
+      "title": "fix(serena): own a compatible PyYAML build constraint",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/648",
+      "state": "open",
+      "draft": true,
+      "head": "fc4dc5c7145e4f4d709b91654ab4bc1fd7abe259",
+      "head_ref": "fix/serena-build-compatibility-20261114",
+      "base": "master",
+      "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "updated_at": "2026-11-18T15:45:07Z"
+    },
+    {
+      "number": 649,
+      "title": "fix(serena): bind qualification home to the owned directory",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/649",
+      "state": "open",
+      "draft": true,
+      "head": "73caa97a860f1eaec205ec84c1502c47ce05cdc0",
+      "head_ref": "fix/serena-qualification-home-20261114",
+      "base": "master",
+      "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "updated_at": "2026-11-18T15:45:09Z"
+    },
+    {
+      "number": 650,
+      "title": "fix(serena): preserve qualification bindings and request budgets",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/650",
+      "state": "open",
+      "draft": true,
+      "head": "686a54c0efbe9f99cb6ffa8d6480b289c6f465bf",
+      "head_ref": "fix/serena-protocol-binding-20261114",
+      "base": "master",
+      "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "updated_at": "2026-11-18T15:45:10Z"
+    },
+    {
+      "number": 651,
+      "title": "fix(serena): unlink owned readonly cache entries",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/651",
+      "state": "open",
+      "draft": true,
+      "head": "01c08819cb0d3fc4fe2b9e11833e40de3c28c3d6",
+      "head_ref": "fix/serena-readonly-cleanup-20261114",
+      "base": "master",
+      "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "updated_at": "2026-11-18T15:45:11Z"
+    },
+    {
+      "number": 652,
+      "title": "fix(serena): read installed files through original tree",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/652",
+      "state": "open",
+      "draft": true,
+      "head": "b079e4c9503f080d8ab09742270c89a3bf88d7d5",
+      "head_ref": "fix/serena-owned-file-reads-20261114",
+      "base": "master",
+      "base_sha": "17bc78fc602efa204a74596409c939a3bf1ddc42",
+      "updated_at": "2026-11-18T15:45:13Z"
+    },
+    {
+      "number": 653,
+      "title": "fix(serena): validate TCP query budgets, Windows headers and IPv6 zones",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/653",
+      "state": "open",
+      "draft": true,
+      "head": "90fd6f69ea4a59856375e29b34cebf4953cb2ff4",
+      "head_ref": "fix/serena-tcp-query-budget-20261115",
+      "base": "master",
+      "base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "updated_at": "2026-11-18T15:45:14Z"
+    },
+    {
+      "number": 654,
+      "title": "fix(serena): receive Ready readback with its original byte bound",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/654",
+      "state": "open",
+      "draft": true,
+      "head": "d01fb6e73013d6a47628b1a9cbecd2d5f3b8e32c",
+      "head_ref": "fix/serena-ready-readback-20261115",
+      "base": "master",
+      "base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "updated_at": "2026-11-18T15:45:15Z"
+    },
+    {
+      "number": 655,
+      "title": "fix(serena): settle preparation before canceling work context",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/655",
+      "state": "open",
+      "draft": true,
+      "head": "2defe618259f7db4144824d19927b032300d160d",
+      "head_ref": "fix/serena-finalize-context-20261115",
+      "base": "master",
+      "base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "updated_at": "2026-11-18T15:45:16Z"
+    },
+    {
+      "number": 656,
+      "title": "fix: receive the original qualification connection close result",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/656",
+      "state": "open",
+      "draft": true,
+      "head": "5efac36d1e2b4be998fadfa4ccfed1a5da098cff",
+      "head_ref": "fix/serena-connection-close-20261115",
+      "base": "master",
+      "base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "updated_at": "2026-11-18T15:45:17Z"
+    },
+    {
+      "number": 657,
+      "title": "test(windows): issue a native canonical command Product fixture for RunV5",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/657",
+      "state": "open",
+      "draft": true,
+      "head": "4fa52b60b719664ede441be339e196a8b9766c50",
+      "head_ref": "fix/canonical-command-test-product-20261116",
+      "base": "master",
+      "base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "updated_at": "2026-11-18T16:56:03Z"
+    },
+    {
+      "number": 658,
+      "title": "chore: canonical AGENTS.md, PR quality plan and Go test diagnostics",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/658",
+      "state": "open",
+      "draft": true,
+      "head": "6cc44839556653b2e8265c39143d36914c7e25e5",
+      "head_ref": "docs/agents-canonical-plan-20261117",
+      "base": "master",
+      "base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "updated_at": "2026-11-20T16:26:51Z"
+    },
+    {
+      "number": 659,
+      "title": "fix(api): preserve unknown port observations in stop decisions",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/659",
+      "state": "open",
+      "draft": true,
+      "head": "a3568dfe3426afaca4176d57a2310097e5214e77",
+      "head_ref": "fix/api-port-pid-observation-20261118",
+      "base": "master",
+      "base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "updated_at": "2026-11-18T21:13:10Z"
+    },
+    {
+      "number": 660,
+      "title": "fix(scheduler): preserve task query results and hidden lookups",
+      "url": "https://github.com/applicate2628/mcp-local-hub/pull/660",
+      "state": "open",
+      "draft": true,
+      "head": "11c286fb634cc63d2c6019a790ff376a1d834af9",
+      "head_ref": "fix/scheduler-hidden-task-lookup-20261119",
+      "base": "master",
+      "base_sha": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "updated_at": "2026-11-20T16:26:50Z"
+    }
+  ],
+  "feedback": [
+    {
+      "number": 623,
+      "head": "203209df3a11b66ccba59cc7a308d3aa8e4cc7f8",
+      "review_count": 6,
+      "commented": 6,
+      "approved": 0,
+      "changes_requested": 0,
+      "current_head_reviews": 0,
+      "new_submissions_since_cutoff": 0,
+      "latest_submitted_at": "2026-11-19T04:07:05Z",
+      "review_ids_states_timestamps_commits_equal_previous": true,
+      "reviews": [
+        {
+          "id": 5962468737,
+          "state": "COMMENTED",
+          "submitted_at": "2026-11-18T18:14:30Z",
+          "commit_id": "9e948c92047d5b05419f01983ed743e358a79989",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/623#pullrequestreview-5962468737"
+        },
+        {
+          "id": 5963809570,
+          "state": "COMMENTED",
+          "submitted_at": "2026-11-18T19:43:55Z",
+          "commit_id": "385d0ae7a58012001ec06ebddc658bcd90c1fd18",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/623#pullrequestreview-5963809570"
+        },
+        {
+          "id": 5965331371,
+          "state": "COMMENTED",
+          "submitted_at": "2026-11-18T21:18:28Z",
+          "commit_id": "7feec21c87760afa3900193974b1d3c71e97dcc1",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/623#pullrequestreview-5965331371"
+        },
+        {
+          "id": 5966233562,
+          "state": "COMMENTED",
+          "submitted_at": "2026-11-18T22:29:37Z",
+          "commit_id": "1e04fea613edc909b13c19f8dad4db5977b3bd69",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/623#pullrequestreview-5966233562"
+        },
+        {
+          "id": 5967529814,
+          "state": "COMMENTED",
+          "submitted_at": "2026-11-19T00:41:01Z",
+          "commit_id": "e8268f067a7fbf797b55352ec601ae8d6b5e41f2",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/623#pullrequestreview-5967529814"
+        },
+        {
+          "id": 5969167690,
+          "state": "COMMENTED",
+          "submitted_at": "2026-11-19T04:07:05Z",
+          "commit_id": "e5df8f9e4002e55b521f509ca363e348e300d8ad",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/623#pullrequestreview-5969167690"
+        }
+      ],
+      "pagination_complete": true,
+      "review_threads": 0,
+      "comments": {
+        "issues": {
+          "count": 20,
+          "pagination_complete": true,
+          "latest_created_at": "2026-11-20T00:32:34Z",
+          "latest_updated_at": "2026-11-20T00:32:34Z",
+          "new_or_updated_since_cutoff": [],
+          "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/issues/623/comments?per_page=100&page=1"
+        },
+        "pulls": {
+          "count": 0,
+          "pagination_complete": true,
+          "latest_created_at": null,
+          "latest_updated_at": null,
+          "new_or_updated_since_cutoff": [],
+          "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/623/comments?per_page=100&page=1"
+        }
+      },
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/623/reviews?per_page=100&page=1"
+    },
+    {
+      "number": 658,
+      "head": "6cc44839556653b2e8265c39143d36914c7e25e5",
+      "review_count": 7,
+      "commented": 7,
+      "approved": 0,
+      "changes_requested": 0,
+      "current_head_reviews": 0,
+      "new_submissions_since_cutoff": 0,
+      "latest_submitted_at": "2026-11-19T04:07:07Z",
+      "review_ids_states_timestamps_commits_equal_previous": true,
+      "reviews": [
+        {
+          "id": 5955451043,
+          "state": "COMMENTED",
+          "submitted_at": "2026-11-18T11:11:07Z",
+          "commit_id": "c0ea2b1d4eec3ef35621cb0dfaa309204a475b7a",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/658#pullrequestreview-5955451043"
+        },
+        {
+          "id": 5956900005,
+          "state": "COMMENTED",
+          "submitted_at": "2026-11-18T12:53:04Z",
+          "commit_id": "56f601712950c99f4f98f0662a1694c2964d5ebf",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/658#pullrequestreview-5956900005"
+        },
+        {
+          "id": 5963809766,
+          "state": "COMMENTED",
+          "submitted_at": "2026-11-18T19:43:56Z",
+          "commit_id": "c150ab5cfb59815ce827ad9bfbe46a0b9a405f27",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/658#pullrequestreview-5963809766"
+        },
+        {
+          "id": 5965365697,
+          "state": "COMMENTED",
+          "submitted_at": "2026-11-18T21:21:09Z",
+          "commit_id": "3c6ef9378950f57bb654e80592be7f8e0e4e22de",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/658#pullrequestreview-5965365697"
+        },
+        {
+          "id": 5966282589,
+          "state": "COMMENTED",
+          "submitted_at": "2026-11-18T22:33:39Z",
+          "commit_id": "539f984ab97bc3f2d389d337d30caa9f9b52e209",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/658#pullrequestreview-5966282589"
+        },
+        {
+          "id": 5967545927,
+          "state": "COMMENTED",
+          "submitted_at": "2026-11-19T00:43:01Z",
+          "commit_id": "bafd67045d6b867709087cff95b7806f0f6d279c",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/658#pullrequestreview-5967545927"
+        },
+        {
+          "id": 5969167931,
+          "state": "COMMENTED",
+          "submitted_at": "2026-11-19T04:07:07Z",
+          "commit_id": "cf7b4b072693ce96b671c1a81e71a6573a0b354c",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/658#pullrequestreview-5969167931"
+        }
+      ],
+      "pagination_complete": true,
+      "review_threads": 0,
+      "comments": {
+        "issues": {
+          "count": 19,
+          "pagination_complete": true,
+          "latest_created_at": "2026-11-20T00:32:33Z",
+          "latest_updated_at": "2026-11-20T00:32:33Z",
+          "new_or_updated_since_cutoff": [],
+          "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/issues/658/comments?per_page=100&page=1"
+        },
+        "pulls": {
+          "count": 0,
+          "pagination_complete": true,
+          "latest_created_at": null,
+          "latest_updated_at": null,
+          "new_or_updated_since_cutoff": [],
+          "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/658/comments?per_page=100&page=1"
+        }
+      },
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/658/reviews?per_page=100&page=1"
+    },
+    {
+      "number": 660,
+      "head": "11c286fb634cc63d2c6019a790ff376a1d834af9",
+      "review_count": 1,
+      "commented": 1,
+      "approved": 0,
+      "changes_requested": 0,
+      "current_head_reviews": 0,
+      "new_submissions_since_cutoff": 0,
+      "latest_submitted_at": "2026-11-19T03:54:03Z",
+      "review_ids_states_timestamps_commits_equal_previous": true,
+      "reviews": [
+        {
+          "id": 5969075719,
+          "state": "COMMENTED",
+          "submitted_at": "2026-11-19T03:54:03Z",
+          "commit_id": "1b870e04f58bbf60fde2d2339fcd4ae9b50b24c3",
+          "url": "https://github.com/applicate2628/mcp-local-hub/pull/660#pullrequestreview-5969075719"
+        }
+      ],
+      "pagination_complete": true,
+      "review_threads": 0,
+      "comments": {
+        "issues": {
+          "count": 8,
+          "pagination_complete": true,
+          "latest_created_at": "2026-11-20T00:32:35Z",
+          "latest_updated_at": "2026-11-20T00:32:35Z",
+          "new_or_updated_since_cutoff": [],
+          "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/issues/660/comments?per_page=100&page=1"
+        },
+        "pulls": {
+          "count": 0,
+          "pagination_complete": true,
+          "latest_created_at": null,
+          "latest_updated_at": null,
+          "new_or_updated_since_cutoff": [],
+          "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/660/comments?per_page=100&page=1"
+        }
+      },
+      "source": "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/660/reviews?per_page=100&page=1"
+    }
+  ],
+  "new_feedback_observed": false,
+  "feedback_scope": [
+    623,
+    658,
+    660
+  ],
+  "metadata_observations": [
+    {
+      "number": 623,
+      "updated_at": "2026-11-20T16:27:55Z",
+      "body_character_count": 12736,
+      "baseline_final_body_character_count": 12736,
+      "note": "updated_at is 38 seconds later than saved observed_utc; final footer/body length was already recorded by baseline. Equal lengths are not proof of equal contents."
+    },
+    {
+      "number": 644,
+      "mergeable_from_connector": false,
+      "head": "1cf5754b81c850a3569be269642b49605895eeb2",
+      "note": "Read-only GitHub metadata observation; unchanged head; baseline lacks mergeable field, so not classified as a new conflict. No merge attempted."
+    },
+    {
+      "note": "Per-PR base_sha metadata varies across old PRs; master verified independently through git/ref/heads/master."
+    }
+  ],
+  "limits": [
+    "APPROVED and CHANGES_REQUESTED totals apply only to #623, #658, #660.",
+    "No review submission is attached to any of the three current heads.",
+    "Baseline has no old review-body hashes; edits to old review bodies were not proven absent. Submission IDs, states, timestamps and commit IDs match.",
+    "No code, test, CI, native-process or integration validation performed."
+  ],
+  "sources": [
+    "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls?state=open&per_page=100&page=1",
+    "https://api.github.com/repos/applicate2628/mcp-local-hub/git/ref/heads/master",
+    "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/623/reviews?per_page=100&page=1",
+    "https://api.github.com/repos/applicate2628/mcp-local-hub/issues/623/comments?per_page=100&page=1",
+    "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/623/comments?per_page=100&page=1",
+    "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/658/reviews?per_page=100&page=1",
+    "https://api.github.com/repos/applicate2628/mcp-local-hub/issues/658/comments?per_page=100&page=1",
+    "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/658/comments?per_page=100&page=1",
+    "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/660/reviews?per_page=100&page=1",
+    "https://api.github.com/repos/applicate2628/mcp-local-hub/issues/660/comments?per_page=100&page=1",
+    "https://api.github.com/repos/applicate2628/mcp-local-hub/pulls/660/comments?per_page=100&page=1"
+  ],
+  "skill_reads": [
+    "c38/git-workflow-and-versioning"
+  ],
+  "no_github_mutations": true,
+  "no_review_comment_or_account_bodies_saved": true
+}

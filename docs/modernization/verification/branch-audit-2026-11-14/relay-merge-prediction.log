@@ -1,0 +1,10 @@
+master=17bc78fc602efa204a74596409c939a3bf1ddc42
+relay=1326779cd9b26c5462063d360fe70ea4c8c1c3ce
+exit=1
+439a504b5dfb0fcfc94e6e44e16fae82612ab5a2
+100644 635e22452001d7d5c2d93020f3b92eff502c464f 1	cmd/mcphub/main.go
+100644 10e7aaf4c614bc9f3bad5c1df404ac7471181f1a 2	cmd/mcphub/main.go
+100644 e8e014f122fc4e5ad6838e1fbafb97329c17c86f 3	cmd/mcphub/main.go
+
+Auto-merging cmd/mcphub/main.go
+CONFLICT (content): Merge conflict in cmd/mcphub/main.go

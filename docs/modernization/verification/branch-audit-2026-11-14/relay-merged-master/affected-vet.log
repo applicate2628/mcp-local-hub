@@ -1,0 +1,1 @@
+Command: go vet -mod=readonly ./internal/daemon ./internal/cli ./cmd/mcphub Exit: 0

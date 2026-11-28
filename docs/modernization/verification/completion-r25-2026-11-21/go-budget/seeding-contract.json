@@ -1,0 +1,354 @@
+{
+  "schema": "r25-invalid-seeding-candidate-v1",
+  "source_ref": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+  "target_path": "internal/cli/install_reconcile_mcp_front_v3_test.go",
+  "source_blob": "8cd1aabdaa136403d37352361092fe612fc14844",
+  "before_sha256": "0c02d2d971651ed037bfa8e184da26fa6e94849b9bcb1090b5ea0277eeeb2f47",
+  "candidate_sha256": "129cfb1db6243af558261cc2899c172667b756529ae67ee2cc1cd3a5951b7e25",
+  "candidate_git_blob": "de1c92f04cdec354ad5b5049d67830bb0081147b",
+  "candidate_bytes": 113769,
+  "patch_sha256": "81fda39721148d69efacc9b342bd4b3f02d23b683fe9eeecbc71412f993c61ca",
+  "base_owner": "master; neither current PR637 nor current PR658 changes this file",
+  "root": "TestMCPFrontV3_SerenaConflictClassifierMutationTable",
+  "positive_case_count": 4,
+  "negative_case_count": 30,
+  "negative_cases": [
+    {
+      "case": "applied-without-pin-is-invalid",
+      "expected_validation_error_fragment": "has mismatched pin binding",
+      "error_owner": "requireMCPFrontSerenaPinBinding",
+      "typed_or_sentinel": false,
+      "basis": "source inspection only; candidate native execution pending"
+    },
+    {
+      "case": "retained-no-receipt-without-pin-is-invalid",
+      "expected_validation_error_fragment": "has mismatched pin binding",
+      "error_owner": "requireMCPFrontSerenaPinBinding",
+      "typed_or_sentinel": false,
+      "basis": "source inspection only; candidate native execution pending"
+    },
+    {
+      "case": "prior-applied-receipt-removed-is-invalid",
+      "expected_validation_error_fragment": "has an invalid authority shape",
+      "error_owner": "validateMCPFrontReconcileReport: classifier invalid gate",
+      "typed_or_sentinel": false,
+      "basis": "source inspection only; candidate native execution pending"
+    },
+    {
+      "case": "prior-applied-current-generation-is-invalid",
+      "expected_validation_error_fragment": "has an invalid authority shape",
+      "error_owner": "validateMCPFrontReconcileReport: classifier invalid gate",
+      "typed_or_sentinel": false,
+      "basis": "source inspection only; candidate native execution pending"
+    },
+    {
+      "case": "prior-applied-post-state-is-invalid",
+      "expected_validation_error_fragment": "has an invalid authority shape",
+      "error_owner": "validateMCPFrontReconcileReport: classifier invalid gate",
+      "typed_or_sentinel": false,
+      "basis": "source inspection only; candidate native execution pending"
+    },
+    {
+      "case": "nil-disposition-is-invalid",
+      "expected_validation_error_fragment": "has an invalid authority shape",
+      "error_owner": "validateMCPFrontReconcileReport: classifier invalid gate",
+      "typed_or_sentinel": false,
+      "basis": "source inspection only; candidate native execution pending"
+    },
+    {
+      "case": "empty-disposition-is-invalid",
+      "expected_validation_error_fragment": "has an invalid authority shape",
+      "error_owner": "validateMCPFrontReconcileReport: classifier invalid gate",
+      "typed_or_sentinel": false,
+      "basis": "source inspection only; candidate native execution pending"
+    },
+    {
+      "case": "baseline-only-disposition-is-invalid",
+      "expected_validation_error_fragment": "has an invalid authority shape",
+      "error_owner": "validateMCPFrontReconcileReport: classifier invalid gate",
+      "typed_or_sentinel": false,
+      "basis": "source inspection only; candidate native execution pending"
+    },
+    {
+      "case": "restored-disposition-is-invalid",
+      "expected_validation_error_fragment": "has an invalid authority shape",
+      "error_owner": "validateMCPFrontReconcileReport: classifier invalid gate",
+      "typed_or_sentinel": false,
+      "basis": "source inspection only; candidate native execution pending"
+    },
+    {
+      "case": "failed-disposition-is-invalid",
+      "expected_validation_error_fragment": "has an invalid authority shape",
+      "error_owner": "validateMCPFrontReconcileReport: classifier invalid gate",
+      "typed_or_sentinel": false,
+      "basis": "source inspection only; candidate native execution pending"
+    },
+    {
+      "case": "unknown-disposition-is-invalid",
+      "expected_validation_error_fragment": "has an invalid authority shape",
+      "error_owner": "validateMCPFrontReconcileReport: classifier invalid gate",
+      "typed_or_sentinel": false,
+      "basis": "source inspection only; candidate native execution pending"
+    },
+    {
+      "case": "wrong-conflict-reason-is-invalid",
+      "expected_validation_error_fragment": "has an invalid authority shape",
+      "error_owner": "validateMCPFrontReconcileReport: classifier invalid gate",
+      "typed_or_sentinel": false,
+      "basis": "source inspection only; candidate native execution pending"
+    },
+    {
+      "case": "wrong-pending-reason-is-invalid",
+      "expected_validation_error_fragment": "has an invalid authority shape",
+      "error_owner": "validateMCPFrontReconcileReport: classifier invalid gate",
+      "typed_or_sentinel": false,
+      "basis": "source inspection only; candidate native execution pending"
+    },
+    {
+      "case": "dependency-identity-is-invalid",
+      "expected_validation_error_fragment": "has an invalid authority shape",
+      "error_owner": "validateMCPFrontReconcileReport: classifier invalid gate",
+      "typed_or_sentinel": false,
+      "basis": "source inspection only; candidate native execution pending"
+    },
+    {
+      "case": "surface-is-invalid",
+      "expected_validation_error_fragment": "carries a serena pin binding",
+      "error_owner": "validateMCPFrontReconcileReport: active-plan LSP pin gate",
+      "typed_or_sentinel": false,
+      "basis": "source inspection only; candidate native execution pending"
+    },
+    {
+      "case": "client-is-invalid",
+      "expected_validation_error_fragment": "does not match its exact identity",
+      "error_owner": "validateMCPFrontReconcileReport: row identity gate",
+      "typed_or_sentinel": false,
+      "basis": "source inspection only; candidate native execution pending"
+    },
+    {
+      "case": "language-is-invalid",
+      "expected_validation_error_fragment": "does not match its exact identity",
+      "error_owner": "validateMCPFrontReconcileReport: row identity gate",
+      "typed_or_sentinel": false,
+      "basis": "source inspection only; candidate native execution pending"
+    },
+    {
+      "case": "row-identity-is-invalid",
+      "expected_validation_error_fragment": "does not match its exact identity",
+      "error_owner": "validateMCPFrontReconcileReport: row identity gate",
+      "typed_or_sentinel": false,
+      "basis": "source inspection only; candidate native execution pending"
+    },
+    {
+      "case": "baseline-marker-is-invalid",
+      "expected_validation_error_fragment": "has an invalid authority shape",
+      "error_owner": "validateMCPFrontReconcileReport: classifier invalid gate",
+      "typed_or_sentinel": false,
+      "basis": "source inspection only; candidate native execution pending"
+    },
+    {
+      "case": "fresh-baseline-state-is-invalid",
+      "expected_validation_error_fragment": "has an invalid authority shape",
+      "error_owner": "validateMCPFrontReconcileReport: classifier invalid gate",
+      "typed_or_sentinel": false,
+      "basis": "source inspection only; candidate native execution pending"
+    },
+    {
+      "case": "attempt-generation-is-invalid",
+      "expected_validation_error_fragment": "has an invalid authority shape",
+      "error_owner": "validateMCPFrontReconcileReport: classifier invalid gate",
+      "typed_or_sentinel": false,
+      "basis": "source inspection only; candidate native execution pending"
+    },
+    {
+      "case": "attempt-operation-is-invalid",
+      "expected_validation_error_fragment": "has an invalid authority shape",
+      "error_owner": "validateMCPFrontReconcileReport: classifier invalid gate",
+      "typed_or_sentinel": false,
+      "basis": "source inspection only; candidate native execution pending"
+    },
+    {
+      "case": "attempt-pre-state-is-invalid",
+      "expected_validation_error_fragment": "has an invalid authority shape",
+      "error_owner": "validateMCPFrontReconcileReport: classifier invalid gate",
+      "typed_or_sentinel": false,
+      "basis": "source inspection only; candidate native execution pending"
+    },
+    {
+      "case": "attempt-intended-state-is-invalid",
+      "expected_validation_error_fragment": "has an invalid authority shape",
+      "error_owner": "validateMCPFrontReconcileReport: classifier invalid gate",
+      "typed_or_sentinel": false,
+      "basis": "source inspection only; candidate native execution pending"
+    },
+    {
+      "case": "active-plan-generation-is-invalid",
+      "expected_validation_error_fragment": "active plan generation 2 does not match artifact generation 1",
+      "error_owner": "validateMCPFrontReconcileReport: plan/artifact generation gate",
+      "typed_or_sentinel": false,
+      "basis": "source inspection only; candidate native execution pending"
+    },
+    {
+      "case": "report-generation-is-invalid",
+      "expected_validation_error_fragment": "active plan generation 1 does not match artifact generation 2",
+      "error_owner": "validateMCPFrontReconcileReport: plan/artifact generation gate",
+      "typed_or_sentinel": false,
+      "basis": "source inspection only; candidate native execution pending"
+    },
+    {
+      "case": "active-plan-row-key-is-invalid",
+      "expected_validation_error_fragment": "active generation operation references unplanned row \"other\"",
+      "error_owner": "validateMCPFrontReconcileReport: planned-row gate",
+      "typed_or_sentinel": false,
+      "basis": "source inspection only; candidate native execution pending"
+    },
+    {
+      "case": "active-plan-operation-is-invalid",
+      "expected_validation_error_fragment": "serena operation \"remove\" is not supported",
+      "error_owner": "validateMCPFrontOperation",
+      "typed_or_sentinel": false,
+      "basis": "source inspection only; candidate native execution pending"
+    },
+    {
+      "case": "active-plan-pre-state-is-invalid",
+      "expected_validation_error_fragment": "has an invalid authority shape",
+      "error_owner": "validateMCPFrontReconcileReport: classifier invalid gate",
+      "typed_or_sentinel": false,
+      "basis": "source inspection only; candidate native execution pending"
+    },
+    {
+      "case": "active-plan-intended-state-is-invalid",
+      "expected_validation_error_fragment": "has an invalid authority shape",
+      "error_owner": "validateMCPFrontReconcileReport: classifier invalid gate",
+      "typed_or_sentinel": false,
+      "basis": "source inspection only; candidate native execution pending"
+    }
+  ],
+  "static_checks": {
+    "git_apply_check": true,
+    "only_selected_root_changed": true,
+    "case_names_and_order_unchanged": true,
+    "no_import_or_production_changes": true,
+    "two_real_common_journal_calls_retained": true,
+    "pin_reader_zero_assertion_retained": true,
+    "domain_assertion_used_by_both_read_and_rollback": true,
+    "go_format_compile_or_tests_executed": false
+  },
+  "safe_selection_args": [
+    "test",
+    "-overlay",
+    "{overlay}",
+    "-json",
+    "-count=1",
+    "-p=1",
+    "-timeout=5m",
+    "-run",
+    "^TestMCPFrontV3_SerenaConflictClassifierMutationTable$",
+    "./internal/cli"
+  ],
+  "runtime_executed": false,
+  "source_compatibility_only": true,
+  "native_leaf_dacl_admission_remains_unverified": true,
+  "production_files_changed": [],
+  "overlay_paths": [
+    "internal/cli/install_reconcile_mcp_front_v3_test.go"
+  ],
+  "expected_tests": {
+    "pass": [
+      "TestMCPFrontV3_SerenaConflictClassifierMutationTable",
+      "TestMCPFrontV3_SerenaConflictClassifierMutationTable/fresh-authority-free-pinless",
+      "TestMCPFrontV3_SerenaConflictClassifierMutationTable/retained-pinned-no-receipt",
+      "TestMCPFrontV3_SerenaConflictClassifierMutationTable/retained-prior-applied",
+      "TestMCPFrontV3_SerenaConflictClassifierMutationTable/applied-without-pin-is-invalid",
+      "TestMCPFrontV3_SerenaConflictClassifierMutationTable/retained-no-receipt-without-pin-is-invalid",
+      "TestMCPFrontV3_SerenaConflictClassifierMutationTable/prior-applied-receipt-removed-is-invalid",
+      "TestMCPFrontV3_SerenaConflictClassifierMutationTable/prior-applied-current-generation-is-invalid",
+      "TestMCPFrontV3_SerenaConflictClassifierMutationTable/prior-applied-post-state-is-invalid",
+      "TestMCPFrontV3_SerenaConflictClassifierMutationTable/nil-disposition-is-invalid",
+      "TestMCPFrontV3_SerenaConflictClassifierMutationTable/empty-disposition-is-invalid",
+      "TestMCPFrontV3_SerenaConflictClassifierMutationTable/baseline-only-disposition-is-invalid",
+      "TestMCPFrontV3_SerenaConflictClassifierMutationTable/restored-disposition-is-invalid",
+      "TestMCPFrontV3_SerenaConflictClassifierMutationTable/failed-disposition-is-invalid",
+      "TestMCPFrontV3_SerenaConflictClassifierMutationTable/unknown-disposition-is-invalid",
+      "TestMCPFrontV3_SerenaConflictClassifierMutationTable/wrong-conflict-reason-is-invalid",
+      "TestMCPFrontV3_SerenaConflictClassifierMutationTable/wrong-pending-reason-is-invalid",
+      "TestMCPFrontV3_SerenaConflictClassifierMutationTable/dependency-identity-is-invalid",
+      "TestMCPFrontV3_SerenaConflictClassifierMutationTable/surface-is-invalid",
+      "TestMCPFrontV3_SerenaConflictClassifierMutationTable/client-is-invalid",
+      "TestMCPFrontV3_SerenaConflictClassifierMutationTable/language-is-invalid",
+      "TestMCPFrontV3_SerenaConflictClassifierMutationTable/row-identity-is-invalid",
+      "TestMCPFrontV3_SerenaConflictClassifierMutationTable/baseline-marker-is-invalid",
+      "TestMCPFrontV3_SerenaConflictClassifierMutationTable/fresh-baseline-state-is-invalid",
+      "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-generation-is-invalid",
+      "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-operation-is-invalid",
+      "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-pre-state-is-invalid",
+      "TestMCPFrontV3_SerenaConflictClassifierMutationTable/attempt-intended-state-is-invalid",
+      "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-generation-is-invalid",
+      "TestMCPFrontV3_SerenaConflictClassifierMutationTable/report-generation-is-invalid",
+      "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-row-key-is-invalid",
+      "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-operation-is-invalid",
+      "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-pre-state-is-invalid",
+      "TestMCPFrontV3_SerenaConflictClassifierMutationTable/active-plan-intended-state-is-invalid",
+      "TestMCPFrontV3_SerenaConflictClassifierMutationTable/not-precondition-conflict",
+      "PACKAGE:mcp-local-hub/internal/cli"
+    ],
+    "fail": [],
+    "skip": []
+  },
+  "expected_exit_code": 0,
+  "instrumentation_phase_markers_present": false,
+  "owner_and_baseline_proof": {
+    "refs": {
+      "master": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "pr637": "1ebe00c5dbac448488d980072e689b1126875dde",
+      "pr658": "2d12d9b63e60387591d27515aef3487c0e3ea560"
+    },
+    "target_blobs": {
+      "master": "8cd1aabdaa136403d37352361092fe612fc14844",
+      "pr637": "8cd1aabdaa136403d37352361092fe612fc14844",
+      "pr658": "8cd1aabdaa136403d37352361092fe612fc14844"
+    },
+    "pr637_diff_of_target": "",
+    "pr658_diff_of_target": "",
+    "last_target_commit": "64b0eddb3a86369a107b03596f795b84882b6b07",
+    "last_target_commit_ancestor_master": true,
+    "master_to_prior_measurement_go_changes": [
+      "cmd/mcphub/main_test.go",
+      "internal/api/hub_mcp_state_read_inode_windows.go",
+      "internal/api/hub_mcp_state_read_policy_windows_test.go",
+      "internal/api/lsp_routing/main_test.go",
+      "internal/api/lsp_routing/resolver_benchmark_test.go",
+      "internal/api/lsp_routing/resolver_test.go",
+      "internal/api/serena_routing/main_test.go",
+      "internal/api/serena_routing/resolver_test.go",
+      "internal/api/serena_routing/shared_observer_public_test.go",
+      "internal/cli/gui_force_test.go",
+      "internal/cli/supervise_reconcile_ipc_test.go",
+      "internal/daemon/host_original_windows_test.go",
+      "internal/daemon/lazy_proxy_readiness_test.go",
+      "internal/daemon/lazy_proxy_test.go",
+      "internal/daemon/main_test.go",
+      "internal/oneapirun/async_owner_test.go",
+      "internal/oneapirun/async_test.go",
+      "internal/oneapirun/main_test.go",
+      "tools/testshards/main.go",
+      "tools/testshards/main_test.go"
+    ],
+    "reader_difference_note": "Two strict-DACL error messages only; gate logic is unchanged. Complete build inputs still differ.",
+    "reader_diff": "diff --git a/internal/api/hub_mcp_state_read_inode_windows.go b/internal/api/hub_mcp_state_read_inode_windows.go\nindex 5b8e75060..a195ce33e 100644\n--- a/internal/api/hub_mcp_state_read_inode_windows.go\n+++ b/internal/api/hub_mcp_state_read_inode_windows.go\n@@ -158,8 +158,8 @@ func readStateFileInodeAnchoredWithObservation(path string, requiresStrict func(\n \tvar parentFallbacks []stateReadParentFallbackObservation\n \tif err := verifyWindowsDACLFromHandleMaskedObserved(parentHandle, windowsDACLSignificantBits, b, \"parent-policy\"); err != nil {\n \t\tif requiresStrict() {\n-\t\t\treturn nil, fmt.Errorf(\"parent %s not single-user safe: %w; %s=1 is set, so the strict parent-dir gate is enforced (unset that env var, or tighten the parent's DACL to remove the offending principal, to proceed)\",\n-\t\t\t\tparentDir, err, RequireSingleUserHomeEnv)\n+\t\t\treturn nil, fmt.Errorf(\"parent %s not single-user safe: %w; effective strict policy is active, so the strict parent-dir gate is enforced (tighten the parent's DACL to remove the offending principal, to proceed)\",\n+\t\t\t\tparentDir, err)\n \t\t}\n \t\tif !stateFileParentGateAllowsDefaultRelax(err) {\n \t\t\treturn nil, fmt.Errorf(\"parent %s not single-user safe: %w\", parentDir, err)\n@@ -260,8 +260,8 @@ func readStateFileInodeAnchoredWithObservation(path string, requiresStrict func(\n \t}\n \tif err := verifyWindowsDACLFromHandleMaskedObserved(fileHandle, windowsDACLSignificantBits, b, \"leaf-policy\"); err != nil {\n \t\tif requiresStrict() {\n-\t\t\treturn nil, fmt.Errorf(\"file %s not single-user safe: %w; %s=1 is set, so the strict file-DACL gate is enforced (unset that env var, or tighten the file's DACL to remove the offending principal, to proceed)\",\n-\t\t\t\tpath, err, RequireSingleUserHomeEnv)\n+\t\t\treturn nil, fmt.Errorf(\"file %s not single-user safe: %w; effective strict policy is active, so the strict file-DACL gate is enforced (tighten the file's DACL to remove the offending principal, to proceed)\",\n+\t\t\t\tpath, err)\n \t\t}\n \t\tif errors.Is(err, ErrWrongOwner) {\n \t\t\treturn nil, err"
+  },
+  "reader_sources": {
+    "internal/api/hub_mcp_state_read_inode_windows.go": {
+      "ref": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "git_blob": "5b8e75060ca88ccba974b0b5f831472627db19be",
+      "bytes": 16950,
+      "sha256": "57d97fc082a20efce4bcc30b8cdcde0d0460502bcf2f5393a12266ee6791ff4d"
+    },
+    "internal/api/state_read_inode_anchor.go": {
+      "ref": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+      "git_blob": "7dc7150e046ce2faf69afea5c063fbbbd3870ec3",
+      "bytes": 6475,
+      "sha256": "87511f3b83bb4d0371bbf6664a8da315eb5d7cb3b4b4386c3e61a8272b4005d2"
+    }
+  }
+}

@@ -1,0 +1,2 @@
+Command: go test -mod=readonly -race ./cmd/mcphub -count=3 -timeout=90s Exit: 0
+ok  	mcp-local-hub/cmd/mcphub	5.726s

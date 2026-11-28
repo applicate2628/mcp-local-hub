@@ -1,0 +1,481 @@
+{
+  "schema": "r25-evidence-summary-v1",
+  "evidence_consistency": "PASS",
+  "qualification_state": "BOUNDED_RESULTS_ONLY",
+  "phases": [
+    {
+      "scope": "pr648",
+      "phase": "prepare",
+      "state": "PASS",
+      "commands": [
+        {
+          "label": "init",
+          "state": "PASS"
+        },
+        {
+          "label": "fetch-exact",
+          "state": "PASS"
+        },
+        {
+          "label": "checkout-exact",
+          "state": "PASS"
+        },
+        {
+          "label": "gofmt-check",
+          "state": "PASS"
+        }
+      ]
+    },
+    {
+      "scope": "pr648",
+      "phase": "qualify",
+      "state": "REJECTED_BEFORE_RUNTIME",
+      "commands": [
+        {
+          "label": "native-pins-default",
+          "state": "NOT_RUN"
+        },
+        {
+          "label": "native-pins-state-tag",
+          "state": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "scope": "pr648",
+      "phase": "build-vet",
+      "state": "REJECTED_BEFORE_RUNTIME",
+      "commands": [
+        {
+          "label": "build-all",
+          "state": "NOT_RUN"
+        },
+        {
+          "label": "vet-all",
+          "state": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "scope": "pr648v2",
+      "phase": "qualify",
+      "state": "COMPILE_FAILED_BEFORE_TESTS",
+      "commands": [
+        {
+          "label": "native-pins-default",
+          "state": "COMPILE_FAILED_BEFORE_TESTS",
+          "kind": "test",
+          "root_pass_events": 0,
+          "root_fail_events": 0,
+          "root_skip_events": 0,
+          "subtest_pass_events": 0,
+          "subtest_fail_events": 0,
+          "subtest_skip_events": 0,
+          "package_pass_events": 0,
+          "package_fail_events": 1,
+          "package_skip_events": 0,
+          "build_fail_events": 1
+        },
+        {
+          "label": "native-pins-state-tag",
+          "state": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "scope": "pr648v2",
+      "phase": "build-vet",
+      "state": "NOT_RUN",
+      "commands": [
+        {
+          "label": "build-all",
+          "state": "NOT_RUN"
+        },
+        {
+          "label": "vet-all",
+          "state": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "scope": "pr648v2",
+      "phase": "admit",
+      "state": "PASS",
+      "commands": [
+        {
+          "label": "gofmt-check",
+          "state": "PASS"
+        }
+      ]
+    },
+    {
+      "scope": "pr648v3",
+      "phase": "qualify",
+      "state": "PASS",
+      "commands": [
+        {
+          "label": "native-pins-default",
+          "state": "PASS",
+          "kind": "test",
+          "root_pass_events": 2,
+          "root_fail_events": 0,
+          "root_skip_events": 0,
+          "subtest_pass_events": 4,
+          "subtest_fail_events": 0,
+          "subtest_skip_events": 0,
+          "package_pass_events": 1,
+          "package_fail_events": 0,
+          "package_skip_events": 0,
+          "build_fail_events": 0
+        },
+        {
+          "label": "native-pins-state-tag",
+          "state": "PASS",
+          "kind": "test",
+          "root_pass_events": 2,
+          "root_fail_events": 0,
+          "root_skip_events": 0,
+          "subtest_pass_events": 4,
+          "subtest_fail_events": 0,
+          "subtest_skip_events": 0,
+          "package_pass_events": 1,
+          "package_fail_events": 0,
+          "package_skip_events": 0,
+          "build_fail_events": 0
+        }
+      ]
+    },
+    {
+      "scope": "pr648v3",
+      "phase": "build-vet",
+      "state": "PASS",
+      "commands": [
+        {
+          "label": "build-all",
+          "state": "PASS",
+          "kind": "build"
+        },
+        {
+          "label": "vet-all",
+          "state": "PASS",
+          "kind": "vet"
+        }
+      ]
+    },
+    {
+      "scope": "pr648v3",
+      "phase": "admit",
+      "state": "PASS",
+      "commands": [
+        {
+          "label": "gofmt-check",
+          "state": "PASS"
+        }
+      ]
+    },
+    {
+      "scope": "go-budget",
+      "phase": "prepare",
+      "state": "PASS",
+      "commands": [
+        {
+          "label": "init",
+          "state": "PASS"
+        },
+        {
+          "label": "fetch-exact",
+          "state": "PASS"
+        },
+        {
+          "label": "checkout-exact",
+          "state": "PASS"
+        },
+        {
+          "label": "gofmt-check",
+          "state": "PASS"
+        }
+      ]
+    },
+    {
+      "scope": "go-budget",
+      "phase": "measure",
+      "state": "PASS",
+      "commands": [
+        {
+          "label": "fixture-phases",
+          "state": "PASS",
+          "kind": "test",
+          "root_pass_events": 1,
+          "root_fail_events": 0,
+          "root_skip_events": 0,
+          "subtest_pass_events": 34,
+          "subtest_fail_events": 0,
+          "subtest_skip_events": 0,
+          "package_pass_events": 1,
+          "package_fail_events": 0,
+          "package_skip_events": 0,
+          "build_fail_events": 0
+        }
+      ]
+    },
+    {
+      "scope": "cmake-retention",
+      "phase": "prepare",
+      "state": "PASS",
+      "commands": [
+        {
+          "label": "init",
+          "state": "PASS"
+        },
+        {
+          "label": "fetch-exact",
+          "state": "PASS"
+        },
+        {
+          "label": "checkout-exact",
+          "state": "PASS"
+        },
+        {
+          "label": "gofmt-check",
+          "state": "PASS"
+        }
+      ]
+    },
+    {
+      "scope": "cmake-retention",
+      "phase": "before-clear",
+      "state": "PASS",
+      "commands": [
+        {
+          "label": "consumer-retention",
+          "state": "PASS",
+          "kind": "test",
+          "root_pass_events": 1,
+          "root_fail_events": 0,
+          "root_skip_events": 0,
+          "subtest_pass_events": 6,
+          "subtest_fail_events": 0,
+          "subtest_skip_events": 0,
+          "package_pass_events": 1,
+          "package_fail_events": 0,
+          "package_skip_events": 0,
+          "build_fail_events": 0
+        }
+      ]
+    },
+    {
+      "scope": "cmake-retention",
+      "phase": "current",
+      "state": "PASS",
+      "commands": [
+        {
+          "label": "consumer-retention",
+          "state": "PASS",
+          "kind": "test",
+          "root_pass_events": 1,
+          "root_fail_events": 0,
+          "root_skip_events": 0,
+          "subtest_pass_events": 6,
+          "subtest_fail_events": 0,
+          "subtest_skip_events": 0,
+          "package_pass_events": 1,
+          "package_fail_events": 0,
+          "package_skip_events": 0,
+          "build_fail_events": 0
+        }
+      ]
+    },
+    {
+      "scope": "invalid-fixtures",
+      "phase": "prepare",
+      "state": "PASS",
+      "commands": [
+        {
+          "label": "init",
+          "state": "PASS"
+        },
+        {
+          "label": "fetch-exact",
+          "state": "PASS"
+        },
+        {
+          "label": "checkout-exact",
+          "state": "PASS"
+        },
+        {
+          "label": "gofmt-check",
+          "state": "PASS"
+        }
+      ]
+    },
+    {
+      "scope": "invalid-fixtures",
+      "phase": "before",
+      "state": "PASS",
+      "commands": [
+        {
+          "label": "invalid-input-control",
+          "state": "PASS",
+          "kind": "test",
+          "root_pass_events": 3,
+          "root_fail_events": 0,
+          "root_skip_events": 0,
+          "subtest_pass_events": 102,
+          "subtest_fail_events": 0,
+          "subtest_skip_events": 0,
+          "package_pass_events": 1,
+          "package_fail_events": 0,
+          "package_skip_events": 0,
+          "build_fail_events": 0
+        }
+      ]
+    },
+    {
+      "scope": "invalid-fixtures",
+      "phase": "candidate",
+      "state": "PASS",
+      "commands": [
+        {
+          "label": "invalid-input-candidate",
+          "state": "PASS",
+          "kind": "test",
+          "root_pass_events": 3,
+          "root_fail_events": 0,
+          "root_skip_events": 0,
+          "subtest_pass_events": 102,
+          "subtest_fail_events": 0,
+          "subtest_skip_events": 0,
+          "package_pass_events": 1,
+          "package_fail_events": 0,
+          "package_skip_events": 0,
+          "build_fail_events": 0
+        }
+      ]
+    },
+    {
+      "scope": "invalid-fixtures",
+      "phase": "tag-race",
+      "state": "PASS",
+      "commands": [
+        {
+          "label": "invalid-input-tag-race",
+          "state": "PASS",
+          "kind": "test",
+          "root_pass_events": 1,
+          "root_fail_events": 0,
+          "root_skip_events": 0,
+          "subtest_pass_events": 34,
+          "subtest_fail_events": 0,
+          "subtest_skip_events": 0,
+          "package_pass_events": 1,
+          "package_fail_events": 0,
+          "package_skip_events": 0,
+          "build_fail_events": 0
+        }
+      ]
+    },
+    {
+      "scope": "invalid-fixtures",
+      "phase": "build-vet",
+      "state": "NOT_RUN",
+      "commands": [
+        {
+          "label": "build-all",
+          "state": "NOT_RUN"
+        },
+        {
+          "label": "vet-all",
+          "state": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "scope": "invalid-oracle",
+      "phase": "admit",
+      "state": "PASS",
+      "commands": [
+        {
+          "label": "gofmt-check",
+          "state": "PASS"
+        }
+      ]
+    },
+    {
+      "scope": "invalid-oracle",
+      "phase": "qualify",
+      "state": "PASS",
+      "commands": [
+        {
+          "label": "validation-default",
+          "state": "PASS",
+          "kind": "test",
+          "root_pass_events": 1,
+          "root_fail_events": 0,
+          "root_skip_events": 0,
+          "subtest_pass_events": 34,
+          "subtest_fail_events": 0,
+          "subtest_skip_events": 0,
+          "package_pass_events": 1,
+          "package_fail_events": 0,
+          "package_skip_events": 0,
+          "build_fail_events": 0
+        },
+        {
+          "label": "validation-state-tag",
+          "state": "PASS",
+          "kind": "test",
+          "root_pass_events": 1,
+          "root_fail_events": 0,
+          "root_skip_events": 0,
+          "subtest_pass_events": 34,
+          "subtest_fail_events": 0,
+          "subtest_skip_events": 0,
+          "package_pass_events": 1,
+          "package_fail_events": 0,
+          "package_skip_events": 0,
+          "build_fail_events": 0
+        }
+      ]
+    },
+    {
+      "scope": "invalid-oracle",
+      "phase": "build-vet",
+      "state": "PASS",
+      "commands": [
+        {
+          "label": "build-all",
+          "state": "PASS",
+          "kind": "build"
+        },
+        {
+          "label": "vet-all",
+          "state": "PASS",
+          "kind": "vet"
+        }
+      ]
+    }
+  ],
+  "scopes": 7,
+  "candidate_go_files": 8,
+  "test_command_attempts": 11,
+  "build_vet_commands": 4,
+  "observed_totals": {
+    "root_pass_events": 16,
+    "root_fail_events": 0,
+    "root_skip_events": 0,
+    "subtest_pass_events": 360,
+    "subtest_fail_events": 0,
+    "subtest_skip_events": 0,
+    "package_pass_events": 10,
+    "package_fail_events": 1,
+    "package_skip_events": 0,
+    "build_fail_events": 1
+  },
+  "historical_compile_failures": 1,
+  "limits": [
+    "Integrity and consistency do not authenticate runtime execution or publication provenance.",
+    "Redacted originals are hash claims; public bytes alone cannot reconstruct or authenticate them.",
+    "Preparation PASS does not execute a rejected candidate; historical failures remain failures.",
+    "Captured source observations and explicit preimages do not requalify full test gates or process-tree settlement."
+  ]
+}

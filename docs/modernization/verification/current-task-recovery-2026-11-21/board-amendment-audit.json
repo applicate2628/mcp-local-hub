@@ -1,0 +1,70 @@
+{
+  "checkpoint": "current-task-recovery-20261121",
+  "code_commit": "ba17867125b3728fb734e90b383639a3ff9175ee",
+  "documents": {
+    "board": {
+      "all_unit_count_after": 6,
+      "all_unit_count_before": 6,
+      "output_bytes": 178829,
+      "output_git_blob": "0983a8762b7e7b9d88a54e8cea31f928dcb6ff4e",
+      "output_sha256": "6f66a18eb37fd87499f291476bc4db7947e77c62616339097b5cb1c072e21f40",
+      "prior_text_reconstructed_byte_equal": true,
+      "protected_units": {
+        "1": {
+          "after_sha256": "d07700a0768d4ff141f75cb25778561e1b1837ac381c084739a328d34719f5a4",
+          "before_sha256": "d07700a0768d4ff141f75cb25778561e1b1837ac381c084739a328d34719f5a4",
+          "byte_equal": true
+        },
+        "2": {
+          "after_sha256": "59ffccab2db712a545b4740a11dac3043d1a45d9f8bf1ab2ee33e73da2629972",
+          "before_sha256": "59ffccab2db712a545b4740a11dac3043d1a45d9f8bf1ab2ee33e73da2629972",
+          "byte_equal": true
+        },
+        "3": {
+          "after_sha256": "9e5ed9f62642dd184fac2a4538bdbdfd43061005c5f3ffc6182771d4bd3e35bc",
+          "before_sha256": "9e5ed9f62642dd184fac2a4538bdbdfd43061005c5f3ffc6182771d4bd3e35bc",
+          "byte_equal": true
+        },
+        "5": {
+          "after_sha256": "e4cd9939a0ae03dc680ef1445bcd975bbb85f6740ad0b81f6770a41b9279320c",
+          "before_sha256": "e4cd9939a0ae03dc680ef1445bcd975bbb85f6740ad0b81f6770a41b9279320c",
+          "byte_equal": true
+        },
+        "6": {
+          "after_sha256": "6146d91ae54dc36c0e0d7bc488bcaa0b6439950ad4343b6a84f6ad58c2a79b69",
+          "before_sha256": "6146d91ae54dc36c0e0d7bc488bcaa0b6439950ad4343b6a84f6ad58c2a79b69",
+          "byte_equal": true
+        }
+      },
+      "reconstructed_prior_sha256": "6bd3005c84a1c599137b2c4760630205b3ebd4a3c47b039d3cdca3fa5e6bc829",
+      "repo_path": "docs/modernization/plans/rust-independent-execution-plan-2026-11-12.md",
+      "source_commit": "530a24978f573769ed59088a27300cdcb092a71d"
+    }
+  },
+  "evidence_commit": null,
+  "github_mutations": false,
+  "input_sha256": "5f279b057b63d8743d58b431721971f998966e33432a51f5e64eb798b76fcf38",
+  "local_only": true,
+  "observed_at_moscow": "2026-11-21T02:54:42.837783+03:00",
+  "observed_at_utc": "2026-11-20T23:54:42.837783+00:00",
+  "schema_version": 1,
+  "sources": {
+    "board": {
+      "blob": "48d2324a5053503ca3cf062a2e247b51b120dee6",
+      "bytes": 167504,
+      "commit": "530a24978f573769ed59088a27300cdcb092a71d",
+      "local": "r20-continuation/docs-update/rendered-board/board.candidate.md",
+      "repo_path": "docs/modernization/plans/rust-independent-execution-plan-2026-11-12.md",
+      "sha256": "6bd3005c84a1c599137b2c4760630205b3ebd4a3c47b039d3cdca3fa5e6bc829"
+    },
+    "plan": {
+      "blob": "4e5730a7299aabbf1a193fcf489757e9751f9300",
+      "bytes": 349630,
+      "commit": "f440a5d86a0298d5f8228be3f7701577df0336f3",
+      "local": "r20-continuation/docs-update/rendered-plan/plan.candidate.md",
+      "repo_path": ".plans/2026-11/open-pr-integration-20261117.md",
+      "sha256": "6ba5d3cdd23f0d85ef2e8cae42df3db2ec7550ee051f98ef2da639545dac05dc"
+    }
+  },
+  "target": "board"
+}

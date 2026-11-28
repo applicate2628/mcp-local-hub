@@ -1,0 +1,1 @@
+Command: go build -mod=readonly -o <RELAY_WORKTREE>\private-build-artifacts\mcphub-compile-only.exe ./cmd/mcphub Exit: 0

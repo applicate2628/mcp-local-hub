@@ -1,0 +1,47 @@
+{
+  "baseline": {
+    "excluded_vendor_bytes_verified": false,
+    "installed_tools_verified": false,
+    "integrity": "PASS",
+    "recorded_tests": 15,
+    "runtime_authenticated": false,
+    "source_files": 7,
+    "vendor_file_hash_entries": 797,
+    "vendor_manifests": 13
+  },
+  "baseline_stdout": {
+    "excluded_vendor_bytes_verified": false,
+    "installed_tools_verified": false,
+    "integrity": "PASS",
+    "recorded_tests": 15,
+    "runtime_authenticated": false,
+    "source_files": 7,
+    "vendor_file_hash_entries": 797,
+    "vendor_manifests": 13
+  },
+  "cases": [
+    {
+      "case": "nul_truncated_extra_name",
+      "error": "ZIP name/type/compression/encryption",
+      "rejected": true
+    },
+    {
+      "case": "duplicate_and_missing_member",
+      "error": "ZIP size/count/collision",
+      "rejected": true
+    },
+    {
+      "case": "stream_tamper_with_updated_outer_hashes",
+      "error": "Raw stream pin differs",
+      "rejected": true
+    },
+    {
+      "case": "fifteen_ok_lines_but_duplicate_test_name",
+      "error": "Exact 15-test oracle differs",
+      "rejected": true
+    }
+  ],
+  "runtime_sha256": "c3a0e7af5368561e510ea183ceb4eafabe2c37c801bfdfd126d65e715d335e7b",
+  "scope": "Local byte-integrity probes only; no Product/Rust execution",
+  "script_sha256": "9953cbc4058f02186e531355f92b4b0a690ffc0e6ab335aaa97d8c529060f124"
+}

@@ -1,0 +1,32 @@
+{
+  "schema": "r25-root-local-verification-observation-v1",
+  "recorded_utc": "2026-11-21 13:24:00 UTC",
+  "scope": "Root independently executed the reviewed standalone verifiers on transferred public bytes. This record is an observation summary, not a verbatim process stdout capture.",
+  "core": {
+    "archive_sha256": "e4da7afcf31d5310df6fcd3d10e13938c01f5b997d7677c9708583c87a6dcf55",
+    "archive_bytes": 2047483,
+    "index_sha256": "5143480a3c9be41a678301c49f60ec251e596f4432058591ecf10401016d39b6",
+    "exit_code": 0,
+    "archive_integrity": "PASS",
+    "inputs": 2719,
+    "zip_members": 2721,
+    "redacted_files": 2,
+    "original_stream_hashes_recomputed": 1038,
+    "original_stream_hashes_remaining_claims": 0,
+    "runtime_authentication": "NOT_ESTABLISHED"
+  },
+  "reader": {
+    "archive_bytes": 82293,
+    "archive_sha256": "6038e3b56b74209dcf118117f767ceb180e55d398fcad0aeffe6c678edf1aec3",
+    "index_sha256": "f64d58dd5a94a64d1196989f4e3dcfd671657433627345bee30aed05213fa8f3",
+    "exit_code": 0,
+    "integrity": "PASS",
+    "files": 31,
+    "redacted_files": 3,
+    "recorded_tests": 15,
+    "runtime_authenticated": false,
+    "excluded_vendor_bytes_verified": false,
+    "installed_tools_verified": false
+  },
+  "published_readback": "Not yet performed at this observation; subsequent closeout records it."
+}

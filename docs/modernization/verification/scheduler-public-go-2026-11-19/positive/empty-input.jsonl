@@ -1,0 +1,2 @@
+{"event":"admission","manifest_valid":false,"pass":false,"scheduler_override_none":false,"windows":true}
+{"duration_ns":517500,"event":"overall","last_result_semantics_qualified":false,"panic_recovered":false,"pass":false,"status":"FAIL","task_status_subset_only":true}

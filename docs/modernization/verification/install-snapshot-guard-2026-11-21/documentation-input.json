@@ -1,0 +1,117 @@
+{
+  "schema_version": 1,
+  "observed_at_utc": "2026-11-20T21:59:12.247647Z",
+  "code_commit": "c55d9ca619f6f9301ba1113615370fc6218d608f",
+  "code_parent": "11c286fb634cc63d2c6019a790ff376a1d834af9",
+  "evidence_commit": null,
+  "code_readback_equal": true,
+  "candidate_matches_published": true,
+  "published_checkout_clean": true,
+  "update_item6": true,
+  "timing_observation": {
+    "summary": "В отрицательном контроле допуска к замене команда завершилась ожидаемым кодом 1: 15 тестовых/подтестовых FAIL и 1 пакетный FAIL за 228,1465403 с при пакетном elapsed 0,036 с. Последнее JSON-событие — 21.11.2026 00:42:33,1938714 МСК; завершение go-команды — 00:45:49,506383 МСК, примерно через 196,31 с после события. Снимок собственных процессов в 00:45:07 МСК показал активный go.exe с идентификатором процесса 1148 и не обнаружил тестового дочернего процесса; это наблюдение данного снимка, а не доказательство состояния всего дерева. Причина паузы не определена; вывод о взаимной блокировке или причине в кэше не делается. Принудительного завершения и повторного запуска не было; этот адресный отрицательный результат не закрывает общий бюджет.",
+    "evidence_path": "local-archive-verification.json"
+  },
+  "evidence_files": {
+    "results": "RESULTS.md",
+    "summary": "execution-summary.json",
+    "review": "INDEPENDENT-REVIEW.md"
+  },
+  "runs": {
+    "negative_control": {
+      "status": "FAIL",
+      "exit_code": 1,
+      "duration_seconds": 228.14654029998928,
+      "command": "go test -json -tags=test_state_path_env -count=1 -timeout=180s -run \"^(TestExecuteInstallToSnapshotFailurePreservesTask|TestExecuteInstallToAbsentSnapshotCreatesWithoutDelete|TestExecuteInstallToAbsentSnapshotCreateConflictPreservesTask|TestExecuteInstallToDeleteFailurePreservesTask|TestExecuteInstallToSnapshotRefusalRollsBackEarlierTask)$\" ./internal/api",
+      "evidence_path": "execution-summary.json",
+      "counts": {
+        "test_pass": 0,
+        "test_fail": 15,
+        "test_skip": 0,
+        "package_pass": 0,
+        "package_fail": 1,
+        "package_skip": 0
+      },
+      "failure_reasons_verified": true
+    },
+    "candidate_target": {
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 52.912820899975486,
+      "command": "go test -json -tags=test_state_path_env -race -count=2 -timeout=180s -run \"^(TestExecuteInstallToSnapshotFailurePreservesTask|TestExecuteInstallToAbsentSnapshotCreatesWithoutDelete|TestExecuteInstallToAbsentSnapshotCreateConflictPreservesTask|TestExecuteInstallToDeleteFailurePreservesTask|TestExecuteInstallToSnapshotRefusalRollsBackEarlierTask)$\" ./internal/api",
+      "evidence_path": "execution-summary.json",
+      "counts": {
+        "test_pass": 30,
+        "test_fail": 0,
+        "test_skip": 0,
+        "package_pass": 1,
+        "package_fail": 0,
+        "package_skip": 0
+      }
+    },
+    "candidate_neighbor": {
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 6.587194300023839,
+      "command": "go test -json -tags=test_state_path_env -race -count=2 -timeout=180s -run \"^(TestExecuteInstallTo_PassAPassB_Separation)$\" ./internal/api",
+      "evidence_path": "execution-summary.json",
+      "counts": {
+        "test_pass": 8,
+        "test_fail": 0,
+        "test_skip": 0,
+        "package_pass": 1,
+        "package_fail": 0,
+        "package_skip": 0
+      }
+    },
+    "candidate_build": {
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 15.63000479992479,
+      "command": "go build ./...",
+      "evidence_path": "execution-summary.json",
+      "counts": null
+    },
+    "candidate_vet": {
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 10.065699000027962,
+      "command": "go vet ./...",
+      "evidence_path": "execution-summary.json",
+      "counts": null
+    },
+    "published_target": {
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 7.02984769991599,
+      "command": "go test -json -tags=test_state_path_env -race -count=2 -timeout=180s -run \"^(TestExecuteInstallToSnapshotFailurePreservesTask|TestExecuteInstallToAbsentSnapshotCreatesWithoutDelete|TestExecuteInstallToAbsentSnapshotCreateConflictPreservesTask|TestExecuteInstallToDeleteFailurePreservesTask|TestExecuteInstallToSnapshotRefusalRollsBackEarlierTask)$\" ./internal/api",
+      "evidence_path": "execution-summary.json",
+      "counts": {
+        "test_pass": 30,
+        "test_fail": 0,
+        "test_skip": 0,
+        "package_pass": 1,
+        "package_fail": 0,
+        "package_skip": 0
+      }
+    }
+  },
+  "broad_checks": {
+    "default": {
+      "status": "NOT_RUN",
+      "reason": "четыре отдельные TestMain-границы этой ветки не квалифицированы; соответствующие исправления #658 в #660 не переносились"
+    },
+    "tagged_api_cli": {
+      "status": "NOT_RUN",
+      "reason": "изоляция тегом сохраняется, но известные продуктовые и тестовые входы полного API/CLI не квалифицированы; прежние полные FAIL без изменения предпосылок не повторялись"
+    }
+  },
+  "artifact_counters": {
+    "evidence_file_count": 25,
+    "archive_bytes": 118332,
+    "archive_entries": 129,
+    "manifest_file_hashes": 128,
+    "archive_sha256": "17ddbab64bca03b3f167bf293b2c402c33654440d8ee1c94134c1627626c4961",
+    "source_streams": 52
+  }
+}

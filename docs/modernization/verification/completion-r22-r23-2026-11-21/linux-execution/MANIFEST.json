@@ -1,0 +1,224 @@
+{
+  "schema": 1,
+  "coverage": "All selected Linux execution files except this manifest",
+  "source_commit_field_means": "Pinned source base plus separately recorded overlay; original receipts are not relabelled",
+  "binary_files_included": false,
+  "files": [
+    {
+      "path": "INDEPENDENT-REVIEW.md",
+      "source": "linux-percent-execution/INDEPENDENT-REVIEW.md",
+      "original_bytes": 12961,
+      "original_sha256": "f4a60aab741de61731373bc62a2fc04c64323ca2eae348cf482674169b8d2430",
+      "public_bytes": 12961,
+      "public_sha256": "f4a60aab741de61731373bc62a2fc04c64323ca2eae348cf482674169b8d2430",
+      "redacted": false
+    },
+    {
+      "path": "run_linux_percent.py",
+      "source": "linux-percent-execution/run_linux_percent.py",
+      "original_bytes": 3755,
+      "original_sha256": "a27741a88a30a895f4a30832241b5a367aa7576f1af0575f000a11d76fb22342",
+      "public_bytes": 3755,
+      "public_sha256": "a27741a88a30a895f4a30832241b5a367aa7576f1af0575f000a11d76fb22342",
+      "redacted": false
+    },
+    {
+      "path": "verify_systemd_percent.py",
+      "source": "linux-percent-execution/verify_systemd_percent.py",
+      "original_bytes": 2123,
+      "original_sha256": "8b5edf8478939bd5c13d8c319b2e86ffc8c911eaf9e0b0f13ab80fce203c921f",
+      "public_bytes": 2123,
+      "public_sha256": "8b5edf8478939bd5c13d8c319b2e86ffc8c911eaf9e0b0f13ab80fce203c921f",
+      "redacted": false
+    },
+    {
+      "path": "source/linux.go",
+      "source": "linux-percent-execution/source/linux.go",
+      "original_bytes": 14296,
+      "original_sha256": "d0f04d5baf045674b7264090e90cc0274312426c3291847956a77397a8e35e9c",
+      "public_bytes": 14296,
+      "public_sha256": "d0f04d5baf045674b7264090e90cc0274312426c3291847956a77397a8e35e9c",
+      "redacted": false
+    },
+    {
+      "path": "source/linux_exec_percent_test.go",
+      "source": "linux-percent-execution/source/linux_exec_percent_test.go",
+      "original_bytes": 2809,
+      "original_sha256": "34db04e7f452df8df0f5ed41683c4aa67da6386196702237ec46e753c4cc5e60",
+      "public_bytes": 2809,
+      "public_sha256": "34db04e7f452df8df0f5ed41683c4aa67da6386196702237ec46e753c4cc5e60",
+      "redacted": false
+    },
+    {
+      "path": "control-run/receipt.json",
+      "source": "linux-percent-execution/control-run/receipt.json",
+      "original_bytes": 2545,
+      "original_sha256": "b1fc866359b6c9e28f4394bfd6b03bd222f68e1c14709dee8d4f3f1fff5e140f",
+      "public_bytes": 2545,
+      "public_sha256": "b1fc866359b6c9e28f4394bfd6b03bd222f68e1c14709dee8d4f3f1fff5e140f",
+      "redacted": false
+    },
+    {
+      "path": "control-run/started.json",
+      "source": "linux-percent-execution/control-run/started.json",
+      "original_bytes": 639,
+      "original_sha256": "342391ce77683e0ddfab25995cfbce95f0f90b767ccc4667d764f1fef0eea5ca",
+      "public_bytes": 639,
+      "public_sha256": "342391ce77683e0ddfab25995cfbce95f0f90b767ccc4667d764f1fef0eea5ca",
+      "redacted": false
+    },
+    {
+      "path": "control-run/stdout.log",
+      "source": "linux-percent-execution/control-run/stdout.log",
+      "original_bytes": 4100,
+      "original_sha256": "f391469e14b77e92fecc92498d0dc782c9e028dde9dcc9ce8e3a17b64eebe533",
+      "public_bytes": 4100,
+      "public_sha256": "f391469e14b77e92fecc92498d0dc782c9e028dde9dcc9ce8e3a17b64eebe533",
+      "redacted": false
+    },
+    {
+      "path": "control-run/stderr.log",
+      "source": "linux-percent-execution/control-run/stderr.log",
+      "original_bytes": 0,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "public_bytes": 0,
+      "public_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false
+    },
+    {
+      "path": "candidate-run/receipt.json",
+      "source": "linux-percent-execution/candidate-run/receipt.json",
+      "original_bytes": 4085,
+      "original_sha256": "d034bbc7e0c3430091d673689b76f1a29acfccc3a76161ae4f74598c6ac6f9e4",
+      "public_bytes": 4085,
+      "public_sha256": "d034bbc7e0c3430091d673689b76f1a29acfccc3a76161ae4f74598c6ac6f9e4",
+      "redacted": false
+    },
+    {
+      "path": "candidate-run/started.json",
+      "source": "linux-percent-execution/candidate-run/started.json",
+      "original_bytes": 641,
+      "original_sha256": "60b9f05d1cb987c0cc76b64e87b4bf55cd3959b5522b6767c689a6fe2df1cec6",
+      "public_bytes": 641,
+      "public_sha256": "60b9f05d1cb987c0cc76b64e87b4bf55cd3959b5522b6767c689a6fe2df1cec6",
+      "redacted": false
+    },
+    {
+      "path": "candidate-run/stdout.log",
+      "source": "linux-percent-execution/candidate-run/stdout.log",
+      "original_bytes": 4069,
+      "original_sha256": "119db653209e2d61e38cf870440bd831da9696ad4a19301bbc657d065c2a2c0c",
+      "public_bytes": 4069,
+      "public_sha256": "119db653209e2d61e38cf870440bd831da9696ad4a19301bbc657d065c2a2c0c",
+      "redacted": false
+    },
+    {
+      "path": "candidate-run/stderr.log",
+      "source": "linux-percent-execution/candidate-run/stderr.log",
+      "original_bytes": 0,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "public_bytes": 0,
+      "public_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false
+    },
+    {
+      "path": "adjacent-run/receipt.json",
+      "source": "linux-percent-execution/adjacent-run/receipt.json",
+      "original_bytes": 1522,
+      "original_sha256": "9e861e39a5b128ac5d08c3e852ca8cd30b21ea46a5f401c22b1c3931676ce9f6",
+      "public_bytes": 1522,
+      "public_sha256": "9e861e39a5b128ac5d08c3e852ca8cd30b21ea46a5f401c22b1c3931676ce9f6",
+      "redacted": false
+    },
+    {
+      "path": "adjacent-run/started.json",
+      "source": "linux-percent-execution/adjacent-run/started.json",
+      "original_bytes": 743,
+      "original_sha256": "81e85529a538ef3fbe96cc1bf32fbc0a856a2fc8deafee7b8e381fa01cb920f0",
+      "public_bytes": 743,
+      "public_sha256": "81e85529a538ef3fbe96cc1bf32fbc0a856a2fc8deafee7b8e381fa01cb920f0",
+      "redacted": false
+    },
+    {
+      "path": "adjacent-run/stdout.log",
+      "source": "linux-percent-execution/adjacent-run/stdout.log",
+      "original_bytes": 515,
+      "original_sha256": "229cd9181a1df8c7cb651e8debf5660f533c92ef1849e9999af1c1475e3030a7",
+      "public_bytes": 515,
+      "public_sha256": "229cd9181a1df8c7cb651e8debf5660f533c92ef1849e9999af1c1475e3030a7",
+      "redacted": false
+    },
+    {
+      "path": "adjacent-run/stderr.log",
+      "source": "linux-percent-execution/adjacent-run/stderr.log",
+      "original_bytes": 0,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "public_bytes": 0,
+      "public_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false
+    },
+    {
+      "path": "native-parser/receipt.json",
+      "source": "linux-percent-execution/native-parser/receipt.json",
+      "original_bytes": 2003,
+      "original_sha256": "8269e1e953d2e9eb371a3050aba57b14b53278bebf5b31d39b0c55c8dee20190",
+      "public_bytes": 1943,
+      "public_sha256": "731ca4691dcc1961169fbf71b683cd6fb2ce56cc5fcfc5ae28cbd98c642baf53",
+      "redacted": true
+    },
+    {
+      "path": "native-parser/control.service",
+      "source": "linux-percent-execution/native-parser/control.service",
+      "original_bytes": 193,
+      "original_sha256": "8e639e017a7f8725d259c7eb3343a6efca183a0bd8cc473b5e3cfbb6311078db",
+      "public_bytes": 178,
+      "public_sha256": "7ac015e20d1109a4cbcaffbc1266a21160a80ff03bc610ba8f6702bad62ceaca",
+      "redacted": true
+    },
+    {
+      "path": "native-parser/control.stdout.log",
+      "source": "linux-percent-execution/native-parser/control.stdout.log",
+      "original_bytes": 0,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "public_bytes": 0,
+      "public_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false
+    },
+    {
+      "path": "native-parser/control.stderr.log",
+      "source": "linux-percent-execution/native-parser/control.stderr.log",
+      "original_bytes": 358,
+      "original_sha256": "3edf956c85d7067621aff28f210c01d9ff0daf507251520b1568e5b64bb0708d",
+      "public_bytes": 328,
+      "public_sha256": "fc4f70d0d8c69f637e88f332d081fbdf5dc44592516da33459faf0707c28b12e",
+      "redacted": true
+    },
+    {
+      "path": "native-parser/candidate.service",
+      "source": "linux-percent-execution/native-parser/candidate.service",
+      "original_bytes": 194,
+      "original_sha256": "b374c5205c828e678306546fd382997faa7f785e57959af522296310ecfe6936",
+      "public_bytes": 179,
+      "public_sha256": "07712a493b1bd0ec8a6380d9744ba486d36272c3b09167dff73ac53a7d0bf993",
+      "redacted": true
+    },
+    {
+      "path": "native-parser/candidate.stdout.log",
+      "source": "linux-percent-execution/native-parser/candidate.stdout.log",
+      "original_bytes": 0,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "public_bytes": 0,
+      "public_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false
+    },
+    {
+      "path": "native-parser/candidate.stderr.log",
+      "source": "linux-percent-execution/native-parser/candidate.stderr.log",
+      "original_bytes": 0,
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "public_bytes": 0,
+      "public_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "redacted": false
+    }
+  ]
+}

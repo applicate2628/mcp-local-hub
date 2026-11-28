@@ -1,0 +1,20 @@
+{
+  "head": "9721681633440d3593d37ffb8f580e5d98440da2",
+  "tree": "016c9faa5aaedb3ed7db2e6b23066913824a4f09",
+  "archive_file": "evidence-redacted.zip",
+  "archive_sha256": "90f962827ce5642afba25137358ad90dfe84a4aafd3583c50835ac168b007f68",
+  "archive_bytes": 48438,
+  "archive_members": 33,
+  "manifest_files": 32,
+  "manifest_sha256": "8a3fa4b0660f649b8b50ffcbbde9912d43da9e2de1add7611cadd1ca27f97b66",
+  "summary_sha256": "00042158f79526614f47aa48613cb4c8528034ae9154ecb4c65722f7cea942fd",
+  "base64_file": "evidence-redacted.base64.txt",
+  "base64_sha256": "e2177eaa3aca4ed588abbf9bd2343cf852c22af4b78c336eadcd9741b502d5dc",
+  "base64_bytes": 64600,
+  "base64_lines": 16,
+  "base64_chunk_characters": 4096,
+  "initial_observation_outcome": "INCOMPLETE_OBSERVATION",
+  "negative_public_value_transfer": "PASS",
+  "full_native_qualification": false,
+  "credential_shape_scan": "PASS"
+}

@@ -1,0 +1,5 @@
+Command: git fetch --unshallow --no-tags origin
+Exit:
+0
+From https://github.com/applicate2628/mcp-local-hub
+ * branch              spike/rx02-go-rust-boundary-20261113 -> FETCH_HEAD

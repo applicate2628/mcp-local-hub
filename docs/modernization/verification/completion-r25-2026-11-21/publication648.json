@@ -1,0 +1,28 @@
+{
+  "schema": "r25-append-publication-v1",
+  "pr": 648,
+  "branch": "fix/serena-build-compatibility-20261114",
+  "before": "fc4dc5c7145e4f4d709b91654ab4bc1fd7abe259",
+  "after": "184104c186108b150d1183318c3f6791f2a4ba5f",
+  "parents": [
+    "fc4dc5c7145e4f4d709b91654ab4bc1fd7abe259"
+  ],
+  "tree": "724265d9250f1d360636f98e14672133740f2c4c",
+  "files": [
+    {
+      "path": "internal/api/serena_prepared_build_constraint_pin_windows_test.go",
+      "status": "added",
+      "additions": 200,
+      "deletions": 0,
+      "blob": "0798bba831c055965be0b4326a44b3c4bf97346b"
+    }
+  ],
+  "published_file_readback_exact": true,
+  "published_blob": "0798bba831c055965be0b4326a44b3c4bf97346b",
+  "published_sha256": "d75864f7d0f8517249ae7a68317f94735cf4589327e1398a757ea120ef997f68",
+  "master_readback": "a7d92d2852c4f6eb8afb0569ef76a545e38aacf7",
+  "published_head_executed": false,
+  "qualification": "Exact original parent plus this byte-identical overlay",
+  "merged": false,
+  "force": false
+}
