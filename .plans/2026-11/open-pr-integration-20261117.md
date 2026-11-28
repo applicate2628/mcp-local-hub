@@ -1,5 +1,25 @@
 # План повышения качества и сокращения очереди PR mcp-local-hub
 
+<!-- cache-acceptance-recovery-20261128:start -->
+<a id="cache-acceptance-recovery-20261128"></a>
+## Восстановление Source4 и полной приёмки — 28 ноября 2026, UTC
+
+**Полная приёмка остаётся открытой.** Сохранён воспроизводимый Source4 `4ac73379a10e09766fe8274a129129a2b565f757`, tree `5b24c5f32541316bb8d24ad75a306c250b14b0b3`, единственный parent e66: 3867 tracked-файлов, пять изменений только тестовых fixtures. [Точный патч, исходный commit object, manifest и разбор](../../docs/modernization/verification/cache-acceptance-recovery-20261128/README.md). Текущие независимые A–D изменения #664 сохранены.
+
+Повторно прочитаны закрытые исходные результаты `focused-v1`: **24 CLI + 4 API root PASS, без FAIL/SKIP**, четыре команды с полученными native owners/readers; execution `bd0c2a5c7bb8098a8935959f7086fb512c4cf5943cb40df1164b6878b1987b49`. Это адресная приёмка Source4, не полный CLI/API и не квалификация публичных HEAD. Исторические **717 = 712 PASS + 5 SKIP** разных ревизий не объявляются восстановленным полным прогоном; соответствие текущему inventory остаётся UNRESOLVED. Два отсутствующих commits `33eaf8af8fc46cb231f48c70f4775922393245b1` и `06f77b3856e43ec5e8e3736123aedb896ae58817` не восстановлены.
+
+Новая коррекция native DWORD error прошла проверку ожидаемого отказа `pwsh-highbit-refusal-v2`: **FAIL / CLOSED_PRESTART_FAIL**, parent exit 1, `physical_complete=true`, ребёнок не создан и не исполнялся; captures/readers не создавались. Parent `3005b897df93cc7c70ca1c917683ed937971bb96229faa894e7e1bf85a6946c0`, execution `cd7c448f1c3cf337e13e4ad77001c6692627e639624f70ede09cd8a9b08d1562`. Этот полученный отказ не является успешным запуском runtime. `controller-finish-v3` сохраняет отдельный canonical-manifest command FAIL при physical CLOSED.
+
+Отдельный `helper-observation-v2` дал **PASS** трёх расположений helper при неизменённом лимите 10 с; Source не менялся. Он не заменяет canonical-root/full приёмку. `runtime-and-helper-observation-v1` сохраняет отдельный **FAIL** по сроку runtime inventory 180 с при закрытых исходных владельцах; частный успех первой команды не меняет этот исход.
+
+Новый `runtime-readback-v2` получил отдельный **PASS** сохранённого runtime: 1276 файлов / 52 каталога / 310287418 байт совпали с manifest; native probe PowerShell 7.7.0 / .NET 11.0.0 завершён. Это не Product/full-suite приёмка. Исходники исправленного controller и observer, а также переносимый runner-шаблон с проверяемым восстановлением точных исполненных байтов сохранены в капсуле; частные планы и captures не опубликованы.
+
+`canonical-controller-build-v1`, `pwsh-probe-v1` и `serena-product-inputs-v1` сохраняют UNKNOWN с неполученным terminal parent exit. Прежние full-v8/full-v9 FAIL/UNKNOWN и остальные исходные отказы не переоцениваются; их кэши не приняты к повторному использованию.
+
+**Остаток:** принять окончательные Source/Product/runtime/private inputs; полный текущий CLI и закрытый cache handoff; 14 migration + 2 canonical controls в обоих режимах; обе неизменённые полные команды с тремя stderr-сценариями и оставшимся expected-failure control; собственное ревью, публикация в существующие PR через штатный gate и обратное чтение. Обе полные команды на Source4 пока **NOT_RUN**. Слияние не выполняется.
+<!-- cache-acceptance-recovery-20261128:end -->
+
+
 <!-- source5-full11-checkpoint-20261126:start -->
 <a id="source5-full11-checkpoint-20261126"></a>
 ## Продолжение контура Serena и регрессии — 26 ноября 2026, UTC
